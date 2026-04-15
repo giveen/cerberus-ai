@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from rxconfig import config
 
 from cerberus_dashboard.cerberus_dashboard import (
     _build_sessions,
@@ -40,3 +41,7 @@ def test_determine_grid_layout_matches_workspace_rules(
     expected: tuple[str, str],
 ) -> None:
     assert determine_grid_layout(count) == expected
+
+
+def test_reflex_badge_is_disabled_in_config() -> None:
+    assert config.show_built_with_reflex is False

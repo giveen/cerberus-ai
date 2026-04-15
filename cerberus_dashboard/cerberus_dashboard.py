@@ -137,6 +137,7 @@ class AgentSession(BaseModel):
     policy_history: list[dict[str, Any]] = Field(default_factory=list)
     tier_status: dict[str, str] = Field(default_factory=_default_tier_status)
     last_command: str = ""
+    active_tool_name: str = ""
     status_line: str = "Standing by for a prompt or command."
 
 
@@ -231,20 +232,6 @@ def _render_custom_css(rules: dict[str, Any]) -> str:
             continue
         blocks.append(f"{selector} {{{_render_css_declarations(declarations)}}}")
     return "\n".join(blocks)
-
-
-def _sidebar_component(*children: rx.Component, **props: Any) -> Any:
-    sidebar = getattr(rx, "sidebar", None)
-    if callable(sidebar):
-        return sidebar(*children, **props)
-    return rx.box(*children, **props)
-
-
-def _stat_component(*children: rx.Component, **props: Any) -> Any:
-    stat = getattr(rx, "stat", None)
-    if callable(stat):
-        return stat(*children, **props)
-    return rx.box(*children, **props)
 
 
 class AgentDashboardState(rx.State):
@@ -383,6 +370,17 @@ class AgentDashboardState(rx.State):
         session = self._session_copy(index)
         session.logs = [*session.logs, _log_entry(role, cleaned)][-MAX_LOG_ENTRIES:]
         self._store_session(index, session)
+
+    @staticmethod
+    def _role_for_runtime_event(channel: str, active_tool_name: str) -> str:
+        normalized_channel = str(channel or "stdout").strip().lower()
+        if normalized_channel == "stderr":
+            return "Audit"
+        if normalized_channel == "status":
+            return "System"
+        if normalized_channel == "stdout" and active_tool_name == PROMPT_DISPATCH_TOOL:
+            return "Assistant"
+        return "Tool"
 
     def _set_pending_action(
         self,
@@ -588,10 +586,12 @@ class AgentDashboardState(rx.State):
             manual_approval_granted=manual_approval_granted,
         )
         session.status_line = status_line
+        if not is_busy:
+            session.active_tool_name = ""
         session.tier_status = self._derive_tier_status(report, manual_approval_granted=manual_approval_granted)
         self._store_session(index, session)
 
-    def _prime_session(self, index: int, command: str) -> None:
+    def _prime_session(self, index: int, command: str, tool_name: str) -> None:
         session = self._session_copy(index)
         session.is_busy = True
         session.status = "verifying"
@@ -600,6 +600,7 @@ class AgentDashboardState(rx.State):
         session.pending_action = None
         session.command_input = ""
         session.last_command = command
+        session.active_tool_name = tool_name
         session.status_line = "Running policy verification."
         session.tier_status = {tier_key: "pending" for tier_key, _ in AUDIT_TIERS}
         session.logs = [
@@ -616,17 +617,16 @@ class AgentDashboardState(rx.State):
         if not message:
             return
 
-        role = "Tool"
-        if channel == "stderr":
-            role = "Audit"
-        elif channel == "status":
-            role = "System"
-
         async with self:
+            role = "Tool"
             if channel == "status" and index < len(self.agent_sessions):
                 session = self._session_copy(index)
                 session.status_line = message
+                role = self._role_for_runtime_event(channel, session.active_tool_name)
                 self._store_session(index, session)
+            elif index < len(self.agent_sessions):
+                session = self._session_copy(index)
+                role = self._role_for_runtime_event(channel, session.active_tool_name)
             self._append_log(index, role, message)
 
     async def _dispatch_verified_action(
@@ -657,6 +657,7 @@ class AgentDashboardState(rx.State):
                 current_session.status = "stopped"
                 current_session.approval_required = False
                 current_session.pending_action = None
+                current_session.active_tool_name = ""
                 current_session.status_line = "Action terminated by user."
                 if not current_session.logs or current_session.logs[-1]["content"] != "⚠️ Action Terminated by User":
                     current_session.logs = [
@@ -680,6 +681,17 @@ class AgentDashboardState(rx.State):
                     status_line="Execution failed.",
                     manual_approval_granted=manual_approval_granted,
                     status="error",
+                )
+                self._refresh_system_health()
+                return
+
+            if execution_result.tool_name == PROMPT_DISPATCH_TOOL:
+                self._apply_report_state(
+                    index,
+                    report,
+                    is_busy=False,
+                    status_line="LLM response received.",
+                    manual_approval_granted=manual_approval_granted,
                 )
                 self._refresh_system_health()
                 return
@@ -711,13 +723,12 @@ class AgentDashboardState(rx.State):
             )
             self._refresh_system_health()
 
-    async def _run_session_command(self, index: int, command: str) -> None:
+    async def _run_session_command(self, index: int, command: str, action: dict[str, Any]) -> None:
         async with self:
             if index >= len(self.agent_sessions):
                 return
             session = self._session_copy(index)
 
-        action = self._parse_prompt_to_action(command)
         system_state = self._system_state_for_session(session)
         action["chat_history"] = list(session.policy_history)
         action["system_state"] = system_state
@@ -830,10 +841,12 @@ class AgentDashboardState(rx.State):
             if not command or session.is_busy:
                 return
 
-            self._prime_session(index, command)
+            action = self._parse_prompt_to_action(command)
+
+            self._prime_session(index, command, str(action.get("tool_name", "") or ""))
             self._refresh_system_health()
 
-        await self._run_session_command(index, command)
+        await self._run_session_command(index, command, action)
 
     @rx.event(background=True)
     async def approve_pending_action(self, session_id: str) -> None:
@@ -853,6 +866,7 @@ class AgentDashboardState(rx.State):
             session.is_busy = True
             session.status = "verifying"
             session.approval_required = False
+            session.active_tool_name = str(pending_action.get("tool_name", "") or "")
             session.status_line = "Manual approval granted. Re-verifying before dispatch."
             session.logs = [
                 *session.logs,
@@ -1180,324 +1194,201 @@ def audit_tier_tile(tier_code: str, tier_label: str, status: Any) -> rx.Componen
 
 
 def render_log_entry(entry: dict[str, str]) -> rx.Component:
-    is_audit = entry["role"] == "Audit"
-    is_system = entry["role"] == "System"
-    label_color = rx.cond(is_audit, NEON_CYAN, rx.cond(is_system, MUTED_TEXT, NEON_GREEN))
-    border_color = rx.cond(is_audit, NEON_CYAN, rx.cond(is_system, "#173817", NEON_GREEN))
-    background = rx.cond(
-        is_audit,
-        "rgba(0, 28, 28, 0.68)",
-        rx.cond(is_system, "rgba(9, 18, 9, 0.9)", "rgba(4, 14, 4, 0.92)"),
-    )
-
-    return rx.box(
-        rx.text(
-            f"[{entry['timestamp']}] {entry['role']}",
-            color=label_color,
-            font_size="0.69rem",
-            font_weight="700",
-            letter_spacing="0.08em",
-        ),
-        rx.text(entry["content"], color=TEXT_PRIMARY, font_size="0.79rem", white_space="pre-wrap"),
-        class_name="terminal-log",
-        border=f"1px solid {border_color}",
-        background=background,
-        border_radius="10px",
-        padding="8px",
-        width="100%",
-    )
-
-
-def approval_strip(session: AgentSession) -> rx.Component:
-    return rx.box(
-        rx.hstack(
+    return rx.cond(
+        entry["role"] == "Assistant",
+        rx.box(
             rx.text(
-                "Tier 4 review is waiting for an operator decision before this agent can dispatch.",
-                color="#FFD166",
-                font_size="0.74rem",
-                width="100%",
+                entry["content"],
+                color=TEXT_PRIMARY,
+                font_size="1rem",
+                line_height="1.75",
+                white_space="pre-wrap",
             ),
-            rx.button(
-                "Approve",
-                on_click=AgentDashboardState.approve_pending_action(session.session_id),  # pyright: ignore[reportCallIssue]
-                background="rgba(255, 209, 102, 0.12)",
-                color="#FFD166",
-                border="1px solid #FFD166",
-                min_width="110px",
-                _hover={"background": "rgba(255, 209, 102, 0.2)"},
-                is_disabled=session.is_busy,
-            ),
-            rx.button(
-                "Deny",
-                on_click=AgentDashboardState.deny_pending_action(session.session_id),  # pyright: ignore[reportCallIssue]
-                background="rgba(255, 107, 107, 0.12)",
-                color="#FF6B6B",
-                border="1px solid #FF6B6B",
-                min_width="110px",
-                _hover={"background": "rgba(255, 107, 107, 0.2)"},
-                is_disabled=session.is_busy,
-            ),
-            spacing="3",
             width="100%",
-            align="center",
         ),
-        border="1px solid rgba(255, 209, 102, 0.32)",
-        background="rgba(52, 37, 0, 0.28)",
-        border_radius="12px",
-        padding="10px 12px",
-        width="100%",
+        rx.box(display="none"),
     )
 
 
 def terminal_window(session: AgentSession) -> rx.Component:
-    is_active = session.session_id == AgentDashboardState.active_session_id
     return rx.box(
+        rx.scroll_area(
+            rx.vstack(
+                rx.foreach(session.logs, render_log_entry),
+                width="100%",
+                align="stretch",
+                spacing="4",
+                min_height="100%",
+            ),
+            type="always",
+            scrollbars="vertical",
+            class_name="terminal-flicker",
+            height="100%",
+            width="100%",
+            background="#000000",
+            border_radius="0",
+            padding="32px 36px",
+        ),
+        background="#000000",
+        width="100%",
+        height="100%",
+        min_height="0",
+    )
+
+
+def session_selector_button(session: AgentSession) -> rx.Component:
+    is_active = session.session_id == AgentDashboardState.active_session_id
+    return rx.button(
+        rx.vstack(
+            rx.text(session.session_id, font_size="0.72rem", font_weight="700", color=TEXT_PRIMARY),
+            rx.text(session.role, font_size="0.64rem", color=MUTED_TEXT),
+            spacing="0",
+            align="start",
+        ),
+        on_click=AgentDashboardState.set_active_session(session.session_id),
+        background=rx.cond(is_active, "rgba(0, 255, 0, 0.14)", "rgba(0, 0, 0, 0.72)"),
+        border=rx.cond(is_active, f"1px solid {NEON_GREEN}", "1px solid rgba(143, 216, 143, 0.22)"),
+        color=TEXT_PRIMARY,
+        min_width="132px",
+        padding="10px 12px",
+        border_radius="12px",
+        _hover={"background": "rgba(0, 255, 0, 0.1)"},
+    )
+
+
+def active_command_form(session: AgentSession) -> rx.Component:
+    return rx.cond(
+        session.session_id == AgentDashboardState.active_session_id,
         rx.vstack(
             rx.hstack(
                 rx.vstack(
-                    rx.hstack(
-                        rx.text(session.session_id, color=NEON_GREEN, font_weight="700", font_size="0.95rem"),
-                        audit_status_chip(session.status),
-                        spacing="2",
-                        align="center",
-                    ),
-                    rx.text(session.role, color=MUTED_TEXT, font_size="0.74rem", letter_spacing="0.08em"),
+                    rx.text(session.session_id, color=NEON_GREEN, font_size="0.78rem", font_weight="700"),
+                    rx.text(session.status_line, color=MUTED_TEXT, font_size="0.68rem"),
                     spacing="1",
                     align="start",
                 ),
                 rx.spacer(),
                 rx.button(
-                    "Detach",
-                    on_click=AgentDashboardState.remove_agent(session.session_id),  # pyright: ignore[reportCallIssue]
-                    background="rgba(255, 255, 255, 0.03)",
-                    color=TEXT_PRIMARY,
-                    border="1px solid rgba(255, 255, 255, 0.12)",
-                    min_width="92px",
-                    height="32px",
-                    _hover={"background": "rgba(255, 255, 255, 0.08)"},
-                    is_disabled=rx.cond(session.is_busy, True, session.approval_required),
+                    "Stop",
+                    on_click=AgentDashboardState.stop_session(session.session_id),
+                    background="rgba(255, 107, 107, 0.08)",
+                    color="#FF8F8F",
+                    border="1px solid rgba(255, 107, 107, 0.55)",
+                    _hover={"background": "rgba(255, 107, 107, 0.14)"},
+                    is_disabled=rx.cond(session.is_busy, False, True),
                 ),
                 width="100%",
                 align="center",
             ),
             rx.hstack(
-                rx.text(
-                    session.status_line,
-                    color=TEXT_PRIMARY,
-                    font_size="0.77rem",
+                rx.form(
+                    rx.text_area(
+                        value=session.command_input,
+                        on_change=AgentDashboardState.set_session_command(session.session_id),
+                        enter_key_submit=True,
+                        placeholder="Type a prompt for the active agent. Press Enter to send.",
+                        rows="1",
+                        resize="none",
+                        disabled=session.is_busy,
+                        width="100%",
+                        min_height="56px",
+                        padding="14px 16px",
+                        background="rgba(0, 0, 0, 0.86)",
+                        color=TEXT_PRIMARY,
+                        border=f"1px solid {NEON_GREEN}",
+                        border_radius="12px",
+                        line_height="1.5",
+                        _focus={
+                            "border": f"1px solid {NEON_CYAN}",
+                            "box_shadow": f"0 0 0 1px {NEON_CYAN}",
+                        },
+                    ),
+                    on_submit=lambda _form_data: AgentDashboardState.process_session_command(session.session_id),
                     width="100%",
-                    white_space="pre-wrap",
-                ),
-                rx.text(
-                    session.workspace_id,
-                    color="#7CCFCF",
-                    font_size="0.68rem",
-                    letter_spacing="0.08em",
-                ),
-                width="100%",
-                align="start",
-                spacing="3",
-            ),
-            rx.scroll_area(
-                rx.vstack(
-                    rx.foreach(session.logs, render_log_entry),
-                    width="100%",
-                    align="stretch",
-                    spacing="2",
-                ),
-                type="always",
-                scrollbars="vertical",
-                class_name="terminal-flicker",
-                height="240px",
-                width="100%",
-                border=f"1px solid {NEON_GREEN}",
-                background="#020602",
-                border_radius="12px",
-                padding="10px",
-            ),
-            rx.cond(session.approval_required, approval_strip(session), rx.box()),
-            rx.hstack(
-                rx.input(
-                    value=session.command_input,
-                    on_change=lambda value: AgentDashboardState.set_session_command(session.session_id, value),  # pyright: ignore[reportCallIssue]
-                    placeholder=f"Prompt or command for {session.role}...",
-                    width="100%",
-                    background="#010101",
-                    color=TEXT_PRIMARY,
-                    border=f"1px solid {NEON_GREEN}",
-                    focus_border_color=NEON_CYAN,
-                    is_disabled=rx.cond(session.is_busy, True, session.approval_required),
                 ),
                 rx.button(
                     "Run",
-                    on_click=AgentDashboardState.process_session_command(session.session_id),  # pyright: ignore[reportCallIssue]
-                    is_disabled=rx.cond(
-                        session.is_busy,
-                        True,
-                        rx.cond(session.approval_required, True, session.command_input == ""),
-                    ),
-                    background="#022202",
+                    on_click=AgentDashboardState.process_session_command(session.session_id),
+                    background="rgba(0, 255, 0, 0.08)",
                     color=NEON_GREEN,
                     border=f"1px solid {NEON_GREEN}",
-                    min_width="92px",
-                    _hover={"background": "#033003"},
+                    min_width="96px",
+                    height="56px",
+                    _hover={"background": "rgba(0, 255, 0, 0.14)"},
+                    is_disabled=session.is_busy,
                 ),
+                width="100%",
+                align="stretch",
+                spacing="3",
+            ),
+            rx.text(
+                "Enter sends the prompt. Shift+Enter inserts a new line.",
+                color=MUTED_TEXT,
+                font_size="0.66rem",
+            ),
+            width="100%",
+            spacing="3",
+            align="stretch",
+        ),
+        rx.box(display="none"),
+    )
+
+
+def bottom_command_bar() -> rx.Component:
+    return rx.box(
+        rx.cond(
+            AgentDashboardState.session_count == 0,
+            rx.hstack(
+                rx.text(
+                    "No active terminal is attached. Start one to begin sending prompts.",
+                    color=MUTED_TEXT,
+                    font_size="0.8rem",
+                ),
+                rx.spacer(),
                 rx.button(
-                    "Stop",
-                    on_click=AgentDashboardState.stop_session(session.session_id),  # pyright: ignore[reportCallIssue]
-                    is_disabled=rx.cond(session.is_busy, False, True),
-                    background="rgba(255, 107, 107, 0.12)",
-                    color="#FF6B6B",
-                    border="1px solid #FF6B6B",
-                    min_width="92px",
-                    _hover={"background": "rgba(255, 107, 107, 0.2)"},
+                    "Attach Agent",
+                    on_click=AgentDashboardState.add_agent,
+                    background="rgba(0, 255, 0, 0.08)",
+                    color=NEON_GREEN,
+                    border=f"1px solid {NEON_GREEN}",
+                    _hover={"background": "rgba(0, 255, 0, 0.14)"},
                 ),
                 width="100%",
                 align="center",
-                spacing="3",
             ),
-            spacing="3",
-            align="stretch",
-            width="100%",
-            height="100%",
-        ),
-        border=rx.cond(
-            is_active,
-            f"1px solid {NEON_CYAN}",
-            "1px solid rgba(0, 255, 0, 0.2)",
-        ),
-        box_shadow=rx.cond(
-            is_active,
-            "0 0 0 1px rgba(0, 255, 255, 0.28), 0 0 28px rgba(0, 255, 255, 0.16)",
-            "0 0 18px rgba(0, 255, 0, 0.08)",
-        ),
-        background=rx.cond(
-            is_active,
-            "linear-gradient(180deg, rgba(0, 32, 32, 0.78), rgba(5, 5, 5, 0.96))",
-            "linear-gradient(180deg, rgba(10, 18, 10, 0.82), rgba(5, 5, 5, 0.96))",
-        ),
-        border_radius="18px",
-        padding="14px",
-        width="100%",
-        height="100%",
-        min_height="0",
-        on_click=AgentDashboardState.set_active_session(session.session_id),
-    )
-
-
-def dashboard_header() -> rx.Component:
-    return neon_panel(
-        rx.hstack(
             rx.vstack(
-                rx.text("CERBERUS AI | Dynamic Terminal Workspace", color=NEON_GREEN, font_size="1.05rem", font_weight="700"),
-                rx.text(
-                    "Each agent owns a dedicated terminal. The workspace starts focused, expands to two columns when needed, and caps at a clean 2x2 grid.",
-                    color=MUTED_TEXT,
-                    font_size="0.78rem",
-                ),
-                spacing="1",
-                align="start",
-            ),
-            rx.spacer(),
-            rx.vstack(
-                rx.text("LIVE GRID", color=NEON_CYAN, font_size="0.8rem", font_weight="700"),
-                rx.text(AgentDashboardState.layout_label, color=TEXT_PRIMARY, font_size="1.22rem", font_weight="700"),
-                rx.text(
-                    "Per-terminal dispatch keeps the grid focused on agent output instead of shared controls.",
-                    color="#9ADADA",
-                    font_size="0.72rem",
-                    text_align="right",
-                ),
-                spacing="1",
-                align="end",
-            ),
-            width="100%",
-            align="center",
-        ),
-    )
-
-
-def system_stat(label: str, value: Any, detail: str) -> rx.Component:
-    return _stat_component(
-        rx.vstack(
-            rx.text(label, color=MUTED_TEXT, font_size="0.7rem", font_weight="700", letter_spacing="0.08em"),
-            rx.text(value, color=NEON_GREEN, font_size="1.2rem", font_weight="700"),
-            rx.text(detail, color="#89B889", font_size="0.68rem"),
-            spacing="1",
-            align="start",
-            width="100%",
-        ),
-        class_name="neon-panel",
-        border_radius="12px",
-        padding="12px",
-        width="100%",
-    )
-
-
-def system_sidebar() -> rx.Component:
-    return _sidebar_component(
-        rx.vstack(
-            rx.text("OPS SIDEBAR", color=NEON_GREEN, font_size="0.98rem", font_weight="700"),
-            rx.text("Global stats, capacity, and project metadata.", color=MUTED_TEXT, font_size="0.74rem"),
-            rx.button(
-                "Add Agent",
-                on_click=AgentDashboardState.add_agent,
-                width="100%",
-                background="#021402",
-                color=NEON_GREEN,
-                border=f"1px solid {NEON_GREEN}",
-                _hover={"background": "#042004"},
-                is_disabled=rx.cond(AgentDashboardState.can_add_agent, False, True),
-            ),
-            system_stat("AGENTS", AgentDashboardState.session_count, f"Capacity: {MAX_SESSIONS} terminal windows"),
-            system_stat("LAYOUT", AgentDashboardState.layout_label, "Reactive 1x1 / 2x1 / 2x2 workspace"),
-            system_stat("FOCUS", AgentDashboardState.active_session_label, "Currently selected terminal"),
-            rx.divider(border_color=NEON_GREEN),
-            system_stat("CPU", f"{AgentDashboardState.cpu_usage}%", "Audit-loop compute pressure"),
-            system_stat("RAM", f"{AgentDashboardState.ram_usage}%", "Session cache residency"),
-            system_stat("NETWORK", f"{AgentDashboardState.net_mbps} MB/s", "Synthetic control traffic"),
-            system_stat("REVIEWS", AgentDashboardState.review_count, "Sessions waiting for operator approval"),
-            system_stat("BUSY NODES", f"{AgentDashboardState.busy_count}", "Sessions currently processing"),
-            system_stat("CLEARED", f"{AgentDashboardState.cleared_count}", "Sessions with all tiers cleared"),
-            system_stat("ALERTS", f"{AgentDashboardState.alert_count}", AgentDashboardState.sensor_health),
-            rx.divider(border_color=NEON_GREEN),
-            neon_panel(
-                rx.vstack(
-                    rx.text("PROJECT METADATA", color=NEON_CYAN, font_size="0.76rem", font_weight="700"),
-                    rx.text("Repository", color=MUTED_TEXT, font_size="0.66rem", letter_spacing="0.08em"),
-                    rx.text(str(REPO_ROOT), color=TEXT_PRIMARY, font_size="0.72rem", white_space="pre-wrap"),
-                    rx.text("Workspace Root", color=MUTED_TEXT, font_size="0.66rem", letter_spacing="0.08em"),
-                    rx.text(
-                        str(_default_workspaces_root()),
-                        color=TEXT_PRIMARY,
-                        font_size="0.72rem",
-                        white_space="pre-wrap",
+                rx.hstack(
+                    rx.hstack(
+                        rx.foreach(AgentDashboardState.visible_sessions, session_selector_button),
+                        spacing="2",
+                        wrap="wrap",
+                        width="100%",
                     ),
-                    spacing="2",
-                    align="start",
+                    rx.button(
+                        "Add Agent",
+                        on_click=AgentDashboardState.add_agent,
+                        background="rgba(0, 255, 255, 0.08)",
+                        color=NEON_CYAN,
+                        border=f"1px solid {NEON_CYAN}",
+                        _hover={"background": "rgba(0, 255, 255, 0.14)"},
+                        is_disabled=rx.cond(AgentDashboardState.can_add_agent, False, True),
+                    ),
                     width="100%",
+                    align="start",
+                    spacing="3",
                 ),
-            ),
-            rx.button(
-                "Refresh Health",
-                on_click=AgentDashboardState.trigger_refresh_system_health,
+                rx.foreach(AgentDashboardState.visible_sessions, active_command_form),
                 width="100%",
-                background="#021402",
-                color=NEON_GREEN,
-                border=f"1px solid {NEON_GREEN}",
-                _hover={"background": "#042004"},
+                spacing="3",
+                align="stretch",
             ),
-            spacing="3",
-            width="100%",
-            align="stretch",
         ),
-        class_name="neon-panel",
-        width="300px",
-        min_width="300px",
-        max_width="300px",
-        height="100%",
-        border_radius="16px",
-        padding="16px",
+        class_name="command-bar",
+        border_top=f"1px solid {NEON_GREEN}",
+        box_shadow="0 -10px 32px rgba(0, 0, 0, 0.55)",
+        padding="14px 18px 18px",
+        width="100%",
+        flex_shrink="0",
     )
 
 
@@ -1522,7 +1413,7 @@ def workspace_grid() -> rx.Component:
             rx.vstack(
                 rx.text("No active terminals", color=MUTED_TEXT, font_size="1rem", font_weight="700"),
                 rx.text(
-                    "Use the sidebar to attach an agent terminal and the workspace will snap back into view.",
+                    "Attach an agent from the bottom command bar and the workspace will snap back into view.",
                     color=MUTED_TEXT,
                     font_size="0.85rem",
                 ),
@@ -1561,22 +1452,14 @@ def workspace_grid() -> rx.Component:
 
 def index() -> rx.Component:
     return rx.box(
-        rx.hstack(
-            system_sidebar(),
-            rx.vstack(
-                dashboard_header(),
-                workspace_grid(),
-                spacing="4",
-                align="stretch",
-                width="100%",
-                height="100%",
-                min_height="0",
-            ),
-            spacing="4",
-            align="stretch",
+        rx.vstack(
+            workspace_grid(),
+            bottom_command_bar(),
+            spacing="0",
             width="100%",
             height="100%",
             min_height="0",
+            align="stretch",
         ),
         class_name="dashboard-root",
         background=BG_BLACK,
@@ -1584,7 +1467,7 @@ def index() -> rx.Component:
         font_family='"JetBrains Mono", "Courier New", monospace',
         width="100vw",
         height="100vh",
-        padding="20px",
+        padding="0",
         overflow="hidden",
         position="relative",
     )
