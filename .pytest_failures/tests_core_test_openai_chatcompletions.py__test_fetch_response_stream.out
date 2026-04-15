@@ -1,0 +1,57 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+__________________________ test_fetch_response_stream __________________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x78949318ffe0>
+
+    @pytest.mark.asyncio
+    async def test_fetch_response_stream(monkeypatch) -> None:
+        """
+        When `stream=True`, `_fetch_response` should return a bare `Response`
+        object along with the underlying async stream. The OpenAI client call
+        should include `stream_options` to request usage-delimited chunks.
+        """
+        os.environ['CEREBRO_STREAM'] = 'true'
+        async def event_stream() -> AsyncIterator[ChatCompletionChunk]:
+            if False:  # pragma: no cover
+                yield  # pragma: no cover
+    
+        class DummyCompletions:
+            def __init__(self) -> None:
+                self.kwargs: dict[str, Any] = {}
+    
+            async def create(self, **kwargs: Any) -> Any:
+                self.kwargs = kwargs
+                return event_stream()
+    
+        class DummyClient:
+            def __init__(self, completions: DummyCompletions) -> None:
+                self.chat = type("_Chat", (), {"completions": completions})()
+                self.base_url = httpx.URL("http://fake")
+    
+        completions = DummyCompletions()
+        dummy_client = DummyClient(completions)
+        model = OpenAIChatCompletionsModel(model=cai_model, openai_client=dummy_client)  # type: ignore
+        with generation_span(disabled=True) as span:
+            response, stream = await model._fetch_response(
+                system_instructions=None,
+                input="hi",
+                model_settings=ModelSettings(),
+                tools=[],
+                output_schema=None,
+                handoffs=[],
+                span=span,
+                tracing=ModelTracing.DISABLED,
+                stream=True,
+            )
+        # Check OpenAI client was called for streaming
+>       assert completions.kwargs["stream"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'stream'
+
+tests/core/test_openai_chatcompletions.py:282: KeyError
+=========================== short test summary info ============================
+FAILED tests/core/test_openai_chatcompletions.py::test_fetch_response_stream
+1 failed in 0.97s
+
+Total CAI Session Cost: $0.000000

@@ -1,0 +1,7 @@
+{
+  "acknowledged_at": "2026-04-14T13:18:20.499350",
+  "dataset_name": "ws_800d819a68e27481",
+  "workspace_path": "/home/jabbatheduck/Projects/cai",
+  "migration_performed_by_this_process": false,
+  "global_marker_location": "/home/jabbatheduck/Projects/cai/.flowbaby/system/.migration_v1_complete"
+}

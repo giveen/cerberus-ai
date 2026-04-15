@@ -1,0 +1,123 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____________ TestCostCommand.test_handle_reset_with_confirmation ______________
+
+self = <test_command_cost.TestCostCommand object at 0x72afe80495b0>
+mock_global_tracker = <MagicMock name='GLOBAL_USAGE_TRACKER' id='126099839694608'>
+cost_command = <cai.repl.commands.cost.CostCommand object at 0x72afe8048710>
+mock_console = <MagicMock name='console' id='126099837453904'>
+temp_usage_file = '/tmp/tmpgd9z9qq4.json'
+
+    @patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER')
+    def test_handle_reset_with_confirmation(self, mock_global_tracker, cost_command,
+                                          mock_console, temp_usage_file):
+        """Test handle_reset with user confirmation."""
+        mock_global_tracker.enabled = True
+        mock_global_tracker.get_summary.return_value = {
+            "global_totals": {
+                "total_cost": 1.234567,
+                "total_sessions": 10
+            }
+        }
+    
+        # Mock user input for confirmation
+        mock_console.input.return_value = "RESET"
+    
+        with patch('cai.repl.commands.cost.Path') as mock_path:
+            mock_path.home.return_value = Path(tempfile.gettempdir())
+            mock_usage_file = MagicMock()
+            mock_usage_file.exists.return_value = True
+            mock_usage_file.with_name.return_value = Path("/tmp/backup.json")
+            mock_path.return_value.__truediv__.return_value.__truediv__.return_value = mock_usage_file
+    
+>           with patch('cai.repl.commands.cost.shutil.copy2') as mock_copy:
+
+tests/commands/test_command_cost.py:315: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/lib/python3.12/unittest/mock.py:1442: in __enter__
+    self.target = self.getter()
+                  ^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'cai.repl.commands.cost.shutil'
+
+    def resolve_name(name):
+        """
+        Resolve a name to an object.
+    
+        It is expected that `name` will be a string in one of the following
+        formats, where W is shorthand for a valid Python identifier and dot stands
+        for a literal period in these pseudo-regexes:
+    
+        W(.W)*
+        W(.W)*:(W(.W)*)?
+    
+        The first form is intended for backward compatibility only. It assumes that
+        some part of the dotted name is a package, and the rest is an object
+        somewhere within that package, possibly nested inside other objects.
+        Because the place where the package stops and the object hierarchy starts
+        can't be inferred by inspection, repeated attempts to import must be done
+        with this form.
+    
+        In the second form, the caller makes the division point clear through the
+        provision of a single colon: the dotted name to the left of the colon is a
+        package to be imported, and the dotted name to the right is the object
+        hierarchy within that package. Only one import is needed in this form. If
+        it ends with the colon, then a module object is returned.
+    
+        The function will return an object (which might be a module), or raise one
+        of the following exceptions:
+    
+        ValueError - if `name` isn't in a recognised format
+        ImportError - if an import failed when it shouldn't have
+        AttributeError - if a failure occurred when traversing the object hierarchy
+                         within the imported package to get to the desired object.
+        """
+        global _NAME_PATTERN
+        if _NAME_PATTERN is None:
+            # Lazy import to speedup Python startup time
+            import re
+            dotted_words = r'(?!\d)(\w+)(\.(?!\d)(\w+))*'
+            _NAME_PATTERN = re.compile(f'^(?P<pkg>{dotted_words})'
+                                       f'(?P<cln>:(?P<obj>{dotted_words})?)?$',
+                                       re.UNICODE)
+    
+        m = _NAME_PATTERN.match(name)
+        if not m:
+            raise ValueError(f'invalid format: {name!r}')
+        gd = m.groupdict()
+        if gd.get('cln'):
+            # there is a colon - a one-step import is all that's needed
+            mod = importlib.import_module(gd['pkg'])
+            parts = gd.get('obj')
+            parts = parts.split('.') if parts else []
+        else:
+            # no colon - have to iterate to find the package boundary
+            parts = name.split('.')
+            modname = parts.pop(0)
+            # first part *must* be a module/package.
+            mod = importlib.import_module(modname)
+            while parts:
+                p = parts[0]
+                s = f'{modname}.{p}'
+                try:
+                    mod = importlib.import_module(s)
+                    parts.pop(0)
+                    modname = s
+                except ImportError:
+                    break
+        # if we reach this point, mod is the module, already imported, and
+        # parts is the list of parts in the object hierarchy to be traversed, or
+        # an empty list if just the module is wanted.
+        result = mod
+        for p in parts:
+>           result = getattr(result, p)
+                     ^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'cai.repl.commands.cost' has no attribute 'shutil'
+
+/usr/lib/python3.12/pkgutil.py:528: AttributeError
+=========================== short test summary info ============================
+FAILED tests/commands/test_command_cost.py::TestCostCommand::test_handle_reset_with_confirmation
+1 failed in 2.30s
+
+Total CAI Session Cost: $0.000000

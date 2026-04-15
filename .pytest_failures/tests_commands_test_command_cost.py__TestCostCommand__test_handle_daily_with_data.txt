@@ -1,0 +1,4 @@
+=== tests/commands/test_command_cost.py::TestCostCommand::test_handle_daily_with_data ===
+TRACE_DEBUG: SynchronousMultiTracingProcessor added processor <cai.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x7c303deb4440>
+TRACE_DEBUG: TraceProvider.register_processor called with <cai.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x7c303deb4440>
+F

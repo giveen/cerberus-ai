@@ -1,0 +1,88 @@
+TRACE_DEBUG: SynchronousMultiTracingProcessor added processor <cai.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x793bb0f1a630>
+TRACE_DEBUG: TraceProvider.register_processor called with <cai.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x793bb0f1a630>
+[04/13/26 14:00:30] Level 25 A AUDIT validation_tool Validation gate passed     
+token  {"token_id": "vt_a90d7dbd9a864fce9c82a119787e0492", "created_at":        
+       "2026-04-13T20:00:30.224889+00:00", "gate": "validate_resource_health",  
+       "status": "passed", "subject": "platform", "digest":                     
+       "fa46dd16e6cb3a8775926981d714af51a9c37f37b3c2ca2fab9750fffaf48235",      
+       "metadata": {"free_disk_mb": 127343.11, "free_mem_mb": 183376.51,        
+       "cpu_load_1m": 1.906, "virtualization_summary": "bare-metal",            
+       "sandbox_active": false}}                                                
+{
+  "validator_gate": "validate_resource_health",
+  "validator": {
+    "ok": true,
+    "gate": "validate_resource_health",
+    "token": {
+      "token_id": "vt_a90d7dbd9a864fce9c82a119787e0492",
+      "created_at": "2026-04-13T20:00:30.224889+00:00",
+      "gate": "validate_resource_health",
+      "status": "passed",
+      "subject": "platform",
+      "digest": "fa46dd16e6cb3a8775926981d714af51a9c37f37b3c2ca2fab9750fffaf48235",
+      "metadata": {
+        "free_disk_mb": 127343.11,
+        "free_mem_mb": 183376.51,
+        "cpu_load_1m": 1.906,
+        "virtualization_summary": "bare-metal",
+        "sandbox_active": false
+      }
+    },
+    "failure": null,
+    "data": {
+      "snapshot": {
+        "cpu_load_1m": 1.90625,
+        "memory_available_bytes": 192284205056,
+        "memory_total_bytes": 269859115008,
+        "disk_free_bytes": 133528924160,
+        "disk_total_bytes": 982240026624,
+        "virtualization_summary": "bare-metal",
+        "sandbox_active": false
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "python3",
+      "host_available": true,
+      "docker_available": false
+    },
+    {
+      "name": "curl",
+      "host_available": true,
+      "docker_available": false
+    },
+    {
+      "name": "nmap",
+      "host_available": false,
+      "docker_available": false
+    },
+    {
+      "name": "tcpdump",
+      "host_available": true,
+      "docker_available": false
+    },
+    {
+      "name": "sqlmap",
+      "host_available": false,
+      "docker_available": false
+    },
+    {
+      "name": "nikto",
+      "host_available": false,
+      "docker_available": false
+    },
+    {
+      "name": "ssh",
+      "host_available": true,
+      "docker_available": false
+    },
+    {
+      "name": "docker",
+      "host_available": true,
+      "docker_available": false
+    }
+  ],
+  "docker_error": "",
+  "workspace": "/home/jabbatheduck/Projects/cai/workspace_cli_test"
+}

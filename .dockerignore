@@ -1,0 +1,70 @@
+.git
+.github
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.venv
+cai_venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.web
+dist
+build
+logs
+tmp_test_run
+dockerized/logs
+workspaces/*/logs# Keep Docker build context lean for root-context builds.
+
+# VCS and editor metadata
+.git
+.gitignore
+.gitattributes
+.github/
+.vscode/
+.idea/
+
+# Python environments and caches
+cai_venv/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local runtime/state directories
+logs/
+tmp_test_run/
+workspaces/
+workspace_cli_test/
+staged/
+loot/
+media/
+memory/
+missions/
+
+# Docs and generated site artifacts not needed for image runtime
+docs/
+mkdocs.yml
+
+# Docker runtime artifacts
+dockerized/logs/
+
+# OS junk
+.DS_Store
+
+# Large local databases / indices
+**/indices/
+**/rag/
+**/versions/
+
+# Misc local files
+*.log
+*.jsonl
+*.tmp

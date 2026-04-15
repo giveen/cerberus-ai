@@ -1,0 +1,54 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_________________ TestCostCommand.test_handle_daily_with_data __________________
+
+self = <test_command_cost.TestCostCommand object at 0x7005bb350a70>
+mock_global_tracker = <MagicMock name='GLOBAL_USAGE_TRACKER' id='123169934829488'>
+cost_command = <cai.repl.commands.cost.CostCommand object at 0x7005bb3508c0>
+mock_console = <MagicMock name='console' id='123170004309040'>
+temp_usage_file = '/tmp/tmp48mzgxb5.json'
+
+    @patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER')
+    def test_handle_daily_with_data(self, mock_global_tracker, cost_command,
+                                   mock_console, temp_usage_file):
+        """Test handle_daily with usage data."""
+        mock_global_tracker.enabled = True
+        with open(temp_usage_file) as f:
+>           usage_data = json.load(f)
+                         ^^^^^^^^^^^^
+
+tests/commands/test_command_cost.py:216: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/lib/python3.12/json/__init__.py:293: in load
+    return loads(fp.read(),
+/usr/lib/python3.12/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <json.decoder.JSONDecoder object at 0x70060bb92990>, s = '', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+>           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+/usr/lib/python3.12/json/decoder.py:355: JSONDecodeError
+=========================== short test summary info ============================
+FAILED tests/commands/test_command_cost.py::TestCostCommand::test_handle_daily_with_data
+1 failed in 2.27s
+
+Total CAI Session Cost: $0.000000

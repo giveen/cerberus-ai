@@ -1,0 +1,58 @@
+# Operating system and editors
+.DS_Store
+.idea/
+.vscode/
+
+# Python caches and artifacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+site/
+
+# Python environments
+.env
+.env.*
+!.env.example
+.venv/
+env/
+venv/
+ENV/
+cai_env/
+cai_venv/
+
+# Test, coverage, and type-checker outputs
+.coverage
+.coverage.*
+.hypothesis/
+.mypy_cache/
+.nox/
+.pyre/
+.pytest_cache/
+.pytype/
+.ruff_cache/
+.tox/
+coverage.xml
+htmlcov/
+pytest_failures/
+
+# Runtime and generated data
+.cai/
+.web/
+logs/
+nohup.out
+*.log
+
+# Frontend and browser artifacts
+node_modules/
+
+# Project-specific generated data
+benchmarks/outputs/
+data/
+workspaces/*
+!workspaces/.gitkeep

@@ -1,0 +1,67 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+________________________ test_fetch_response_non_stream ________________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x71d6df44ba40>
+
+    @pytest.mark.asyncio
+    async def test_fetch_response_non_stream(monkeypatch) -> None:
+        """
+        Verify that `_fetch_response` builds the correct OpenAI API call when not
+        streaming and returns the ChatCompletion object directly. We supply a
+        dummy ChatCompletion through a stubbed OpenAI client and inspect the
+        captured kwargs.
+        """
+    
+        # Dummy completions to record kwargs
+        class DummyCompletions:
+            def __init__(self) -> None:
+                self.kwargs: dict[str, Any] = {}
+    
+            async def create(self, **kwargs: Any) -> Any:
+                self.kwargs = kwargs
+                return chat
+    
+        class DummyClient:
+            def __init__(self, completions: DummyCompletions) -> None:
+                self.chat = type("_Chat", (), {"completions": completions})()
+                self.base_url = httpx.URL("http://fake")
+    
+        msg = ChatCompletionMessage(role="assistant", content="ignored")
+        choice = Choice(index=0, finish_reason="stop", message=msg)
+        chat = ChatCompletion(
+            id="resp-id",
+            created=0,
+            model="fake",
+            object="chat.completion",
+            choices=[choice],
+        )
+        completions = DummyCompletions()
+        dummy_client = DummyClient(completions)
+        model = OpenAIChatCompletionsModel(model=cai_model, openai_client=dummy_client)  # type: ignore
+        # Execute the private fetch with a system instruction and simple string input.
+        with generation_span(disabled=True) as span:
+            result = await model._fetch_response(
+                system_instructions="sys",
+                input="hi",
+                model_settings=ModelSettings(),
+                tools=[],
+                output_schema=None,
+                handoffs=[],
+                span=span,
+                tracing=ModelTracing.DISABLED,
+                stream=False,
+            )
+    
+        # Ensure expected args were passed through to OpenAI client.
+        kwargs = completions.kwargs
+>       assert kwargs["stream"] is False
+               ^^^^^^^^^^^^^^^^
+E       KeyError: 'stream'
+
+tests/core/test_openai_chatcompletions.py:228: KeyError
+=========================== short test summary info ============================
+FAILED tests/core/test_openai_chatcompletions.py::test_fetch_response_non_stream
+1 failed in 0.42s
+
+Total CAI Session Cost: $0.000000

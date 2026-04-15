@@ -1,0 +1,2 @@
+echo file-task-1
+python -c "print(321)"

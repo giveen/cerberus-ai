@@ -1,0 +1,101 @@
+{
+  "snapshot_at": "2026-04-13T20:06:33.389433+00:00",
+  "workspace": "/home/jabbatheduck/Projects/cai/workspace_cli_test",
+  "nodes": {
+    "mission.memory.status": {
+      "key": "mission.memory.status",
+      "value": "hot",
+      "stale": false,
+      "parent_keys": [],
+      "updated_at": "2026-04-13T20:06:33.255992+00:00",
+      "meta": {
+        "tiers": [
+          "logic",
+          "episodic",
+          "semantic",
+          "vector"
+        ]
+      }
+    },
+    "mission.scope.source": {
+      "key": "mission.scope.source",
+      "value": "cli:/home/jabbatheduck/Projects/cai/workspace_cli_test/scope.json",
+      "stale": false,
+      "parent_keys": [],
+      "updated_at": "2026-04-13T20:06:33.383524+00:00",
+      "meta": {}
+    },
+    "mission.scope.loaded": {
+      "key": "mission.scope.loaded",
+      "value": true,
+      "stale": false,
+      "parent_keys": [],
+      "updated_at": "2026-04-13T20:06:33.383862+00:00",
+      "meta": {}
+    },
+    "mission.scope.targets.0": {
+      "key": "mission.scope.targets.0",
+      "value": "127.0.0.1",
+      "stale": false,
+      "parent_keys": [],
+      "updated_at": "2026-04-13T20:06:33.383995+00:00",
+      "meta": {}
+    },
+    "mission.scope.authorized_cidrs.0": {
+      "key": "mission.scope.authorized_cidrs.0",
+      "value": "127.0.0.0/8",
+      "stale": false,
+      "parent_keys": [],
+      "updated_at": "2026-04-13T20:06:33.384216+00:00",
+      "meta": {}
+    },
+    "mission.scope.boundaries.mode": {
+      "key": "mission.scope.boundaries.mode",
+      "value": "cli_test",
+      "stale": false,
+      "parent_keys": [],
+      "updated_at": "2026-04-13T20:06:33.384382+00:00",
+      "meta": {}
+    },
+    "host.127.0.0.1.authorized": {
+      "key": "host.127.0.0.1.authorized",
+      "value": true,
+      "stale": false,
+      "parent_keys": [],
+      "updated_at": "2026-04-13T20:06:33.384495+00:00",
+      "meta": {}
+    },
+    "scope.127.0.0.1.status": {
+      "key": "scope.127.0.0.1.status",
+      "value": "in_scope",
+      "stale": false,
+      "parent_keys": [],
+      "updated_at": "2026-04-13T20:06:33.384600+00:00",
+      "meta": {}
+    },
+    "scope_range.127.0.0.0_8.status": {
+      "key": "scope_range.127.0.0.0_8.status",
+      "value": "authorized",
+      "stale": false,
+      "parent_keys": [],
+      "updated_at": "2026-04-13T20:06:33.384701+00:00",
+      "meta": {}
+    },
+    "mission.cmcd.path": {
+      "key": "mission.cmcd.path",
+      "value": "/home/jabbatheduck/Projects/cai/src/cai/prompts/core/system_master_template.md",
+      "stale": false,
+      "parent_keys": [],
+      "updated_at": "2026-04-13T20:06:33.386861+00:00",
+      "meta": {}
+    },
+    "mission.cmcd.sha256": {
+      "key": "mission.cmcd.sha256",
+      "value": "9054b06e2a08dd37d80d5259b64e2aed8ac1f36140140ed2982f5a5859cc554c",
+      "stale": false,
+      "parent_keys": [],
+      "updated_at": "2026-04-13T20:06:33.387070+00:00",
+      "meta": {}
+    }
+  }
+}

@@ -1,0 +1,59 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+__________________ TestCostCommand.test_handle_reset_no_data ___________________
+
+self = <test_command_cost.TestCostCommand object at 0x7bf6383312e0>
+mock_global_tracker = <MagicMock name='GLOBAL_USAGE_TRACKER' id='136297434698608'>
+cost_command = <cai.repl.commands.cost.CostCommand object at 0x7bf6383306e0>
+mock_console = <MagicMock name='console' id='136297436609424'>
+
+    @patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER')
+    def test_handle_reset_no_data(self, mock_global_tracker, cost_command, mock_console):
+        """Test handle_reset when no usage data exists."""
+        mock_global_tracker.enabled = True
+    
+        with patch('cai.repl.commands.cost.Path') as mock_path:
+            mock_path.home.return_value = Path("/home/test")
+            mock_usage_file = MagicMock()
+            mock_usage_file.exists.return_value = False
+            mock_path.return_value.__truediv__.return_value.__truediv__.return_value = mock_usage_file
+    
+>           result = cost_command.handle_reset()
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/commands/test_command_cost.py:287: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <cai.repl.commands.cost.CostCommand object at 0x7bf6383306e0>
+args = None
+
+    def handle_reset(self, args: Optional[List[str]] = None) -> bool:
+        """Reset usage statistics (with confirmation)."""
+        if not GLOBAL_USAGE_TRACKER.enabled:
+            console.print("[yellow]Usage tracking is disabled[/yellow]")
+            return True
+    
+        from pathlib import Path
+        usage_file = Path.home() / ".cai" / "usage.json"
+    
+        if not usage_file.exists():
+            console.print("[yellow]No usage data to reset[/yellow]")
+            return True
+    
+        # Show current totals before reset
+        summary = GLOBAL_USAGE_TRACKER.get_summary()
+        totals = summary.get("global_totals", {})
+        total_cost = totals.get("total_cost", 0)
+        total_sessions = totals.get("total_sessions", 0)
+    
+        console.print(f"\n[bold red]Warning:[/bold red] This will reset all usage statistics!")
+>       console.print(f"Current totals: ${total_cost:.6f} across {total_sessions} sessions")
+                                         ^^^^^^^^^^^^^^^^
+E       TypeError: unsupported format string passed to MagicMock.__format__
+
+src/cai/repl/commands/cost.py:539: TypeError
+=========================== short test summary info ============================
+FAILED tests/commands/test_command_cost.py::TestCostCommand::test_handle_reset_no_data
+1 failed in 2.38s
+
+Total CAI Session Cost: $0.000000

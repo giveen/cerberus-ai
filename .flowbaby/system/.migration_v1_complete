@@ -1,0 +1,11 @@
+{
+  "migrated_at": "2026-04-14T12:07:25.177954",
+  "workspace_id": "ws_800d819a68e27481",
+  "workspace_path": "/home/jabbatheduck/Projects/cai",
+  "data_dir_size_before": 0,
+  "data_dir_size_after": 0,
+  "version": "v1",
+  "note": "Marker created without prune - fresh workspace",
+  "prune_skipped": true,
+  "reason": "fresh_workspace"
+}

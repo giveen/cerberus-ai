@@ -1,0 +1,41 @@
+=== tests/commands/test_command_cost.py::TestCostCommand::test_handle_models_with_data ===
+TRACE_DEBUG: SynchronousMultiTracingProcessor added processor <cai.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x7b4cd87a02f0>
+TRACE_DEBUG: TraceProvider.register_processor called with <cai.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x7b4cd87a02f0>
+F
+=================================== FAILURES ===================================
+_________________ TestCostCommand.test_handle_models_with_data _________________
+
+self = <test_command_cost.TestCostCommand object at 0x7b4c8ac3fd10>
+mock_global_tracker = <MagicMock name='GLOBAL_USAGE_TRACKER' id='135568687077936'>
+cost_command = <cai.repl.commands.cost.CostCommand object at 0x7b4c8b5760f0>
+mock_console = <MagicMock name='console' id='135568672936384'>
+temp_usage_file = '/tmp/tmptfvx1n_f.json'
+
+    @patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER')
+    def test_handle_models_with_data(self, mock_global_tracker, cost_command,
+                                    mock_console, temp_usage_file):
+        """Test handle_models with usage data."""
+        mock_global_tracker.enabled = True
+        with open(temp_usage_file) as f:
+            usage_data = json.load(f)
+        mock_global_tracker.usage_data = usage_data
+    
+        # Call handle_models
+        result = cost_command.handle_models()
+        assert result is True
+    
+        # Verify table was created
+        assert mock_console.print.called
+        print_calls = [str(call) for call in mock_console.print.call_args_list]
+>       assert any("Model Usage Statistics" in str(call) for call in print_calls)
+E       assert False
+E        +  where False = any(<generator object TestCostCommand.test_handle_models_with_data.<locals>.<genexpr> at 0x7b4cd96b2180>)
+
+tests/commands/test_command_cost.py:215: AssertionError
+=========================== short test summary info ============================
+FAILED tests/commands/test_command_cost.py::TestCostCommand::test_handle_models_with_data
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed in 2.31s
+
+Total CAI Session Cost: $0.000000
+[EXIT:0]

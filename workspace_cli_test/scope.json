@@ -1,0 +1,1 @@
+{"targets":["127.0.0.1"],"authorized_cidrs":["127.0.0.0/8"],"boundaries":{"mode":"cli_test"}}

@@ -1,0 +1,89 @@
+=== RUNNING: tests/commands/test_command_cost.py::TestCostCommand::test_handle_models_with_data ===
+EXIT:1
+=== RUNNING: tests/commands/test_command_cost.py::TestCostCommand::test_handle_daily_with_data ===
+EXIT:1
+=== RUNNING: tests/commands/test_command_cost.py::TestCostCommand::test_handle_sessions_with_data ===
+EXIT:1
+=== RUNNING: tests/commands/test_command_cost.py::TestCostCommand::test_handle_sessions_with_limit ===
+EXIT:1
+=== RUNNING: tests/commands/test_command_cost.py::TestCostCommand::test_handle_reset_no_data ===
+EXIT:1
+=== RUNNING: tests/commands/test_command_cost.py::TestCostCommand::test_handle_reset_with_confirmation ===
+EXIT:1
+=== RUNNING: tests/core/test_openai_chatcompletions.py::test_fetch_response_non_stream ===
+EXIT:1
+=== RUNNING: tests/core/test_openai_chatcompletions.py::test_fetch_response_stream ===
+EXIT:1
+=== RUNNING: tests/mcp/test_mcp_tracing.py::test_mcp_tracing ===
+EXIT:0
+=== RUNNING: tests/tracing/test_agent_tracing.py::test_single_run_is_single_trace ===
+EXIT:0
+=== RUNNING: tests/tracing/test_agent_tracing.py::test_multiple_runs_are_multiple_traces ===
+EXIT:0
+=== RUNNING: tests/tracing/test_agent_tracing.py::test_wrapped_trace_is_single_trace ===
+EXIT:0
+=== RUNNING: tests/tracing/test_agent_tracing.py::test_trace_config_works ===
+EXIT:0
+=== RUNNING: tests/tracing/test_agent_tracing.py::test_not_starting_streaming_creates_trace ===
+EXIT:0
+=== RUNNING: tests/tracing/test_agent_tracing.py::test_streaming_single_run_is_single_trace ===
+EXIT:0
+=== RUNNING: tests/tracing/test_agent_tracing.py::test_multiple_streamed_runs_are_multiple_traces ===
+EXIT:0
+=== RUNNING: tests/tracing/test_agent_tracing.py::test_wrapped_streaming_trace_is_single_trace ===
+EXIT:0
+=== RUNNING: tests/tracing/test_agent_tracing.py::test_wrapped_mixed_trace_is_single_trace ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing.py::test_simple_tracing ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing.py::test_ctxmanager_spans ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing.py::test_async_tracing ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing.py::test_complex_async_tracing ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing.py::test_spans_with_setters ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing.py::test_enabled_trace_disabled_span ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing.py::test_start_and_end_called_manual ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing.py::test_start_and_end_called_ctxmanager ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing.py::test_start_and_end_called_async_ctxmanager ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors.py::test_single_turn_model_error ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors.py::test_multi_turn_no_handoffs ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors.py::test_tool_call_error ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors.py::test_multiple_handoff_doesnt_error ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors.py::test_multiple_final_output_doesnt_error ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors.py::test_handoffs_lead_to_correct_agent_spans ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors.py::test_max_turns_exceeded ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors.py::test_guardrail_error ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors_streamed.py::test_single_turn_model_error ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors_streamed.py::test_multi_turn_no_handoffs ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors_streamed.py::test_tool_call_error ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors_streamed.py::test_multiple_handoff_doesnt_error ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors_streamed.py::test_multiple_final_output_no_error ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors_streamed.py::test_handoffs_lead_to_correct_agent_spans ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors_streamed.py::test_max_turns_exceeded ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors_streamed.py::test_input_guardrail_error ===
+EXIT:0
+=== RUNNING: tests/tracing/test_tracing_errors_streamed.py::test_output_guardrail_error ===
+EXIT:0
+ALL DONE

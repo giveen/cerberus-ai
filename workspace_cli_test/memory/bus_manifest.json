@@ -1,0 +1,13 @@
+{
+  "committed_at": "2026-04-13T20:06:33.389+00:00",
+  "commit_seq": 1,
+  "workspace": "/home/jabbatheduck/Projects/cai/workspace_cli_test",
+  "health": {
+    "episodic_short_term_used": 0,
+    "episodic_short_term_max": 500,
+    "episodic_saturation_pct": 0.0,
+    "episodic_auto_summarised": false,
+    "logic_node_count": 11,
+    "commit_count": 1
+  }
+}
