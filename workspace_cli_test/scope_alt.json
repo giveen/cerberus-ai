@@ -1,0 +1,1 @@
+{"targets":["192.0.2.10"],"authorized_cidrs":["192.0.2.0/24"],"boundaries":{"mode":"cli_override"}}

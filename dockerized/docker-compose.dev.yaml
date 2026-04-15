@@ -1,0 +1,11 @@
+services:
+  cai:
+    # Enable live source development without rebuilding the image.
+    # Usage:
+    #   docker compose -f dockerized/docker-compose.yaml -f dockerized/docker-compose.dev.yaml up -d
+    # Then after code edits, restart only the service:
+    #   docker compose -f dockerized/docker-compose.yaml -f dockerized/docker-compose.dev.yaml restart cai
+    volumes:
+      - ..:/opt/cai-src:rw
+    environment:
+      - PYTHONPATH=/opt/cai-src/src

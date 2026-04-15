@@ -1,0 +1,10 @@
+ROUNDED = "ROUNDED"
+SIMPLE = "SIMPLE"
+SIMPLE_HEAVY = "SIMPLE_HEAVY"
+SQUARE = "SQUARE"
+DOUBLE = "DOUBLE"
+MINIMAL = "MINIMAL"
+
+
+def as_list(*values):
+    return list(values)
