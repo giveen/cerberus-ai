@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from cai.tools.runners import docker as docker_runner
-from cai.tools.runners import local as local_runner
-from cai.tools import validation as validation_tool
+from cerberus.tools.runners import docker as docker_runner
+from cerberus.tools.runners import local as local_runner
+from cerberus.tools import validation as validation_tool
 
 
 def test_local_runner_wrapper_returns_plain_string(monkeypatch):

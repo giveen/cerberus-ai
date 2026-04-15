@@ -1,5 +1,5 @@
-from cai.rag.vector_db_adapter import LocalFallbackAdapter
-from cai.rag.retriever_pipeline import (
+from cerberus.rag.vector_db_adapter import LocalFallbackAdapter
+from cerberus.rag.retriever_pipeline import (
     DenseRetriever,
     SimpleBM25,
     RetrieverCombiner,
@@ -37,7 +37,7 @@ def test_reranker_improves_order():
     ad, docs = _make_adapter_and_docs()
     dense = DenseRetriever(adapter=ad, collection_name="test")
     sparse = SimpleBM25(docs=docs)
-    from cai.rag.embeddings import LocalDeterministicEmbeddingsProvider
+    from cerberus.rag.embeddings import LocalDeterministicEmbeddingsProvider
 
     reranker = Reranker(embeddings_provider=LocalDeterministicEmbeddingsProvider({"vector_dim": 32}))
     pipeline = RetrieverPipeline(dense=dense, sparse=sparse, reranker=reranker)
@@ -50,8 +50,8 @@ def test_reranker_improves_order():
 
 
 def test_wakeup_integration():
-    from cai.rag.wakeup_index import WakeupIndex
-    from cai.rag.embeddings import LocalDeterministicEmbeddingsProvider
+    from cerberus.rag.wakeup_index import WakeupIndex
+    from cerberus.rag.embeddings import LocalDeterministicEmbeddingsProvider
 
     ad, docs = _make_adapter_and_docs()
     dense = DenseRetriever(adapter=ad, collection_name="test")

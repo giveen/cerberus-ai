@@ -1,5 +1,5 @@
-from cai.tools.reconnaissance import smbclient_tool
-from cai.sdk.agents.tool import FunctionTool
+from cerberus.tools.reconnaissance import smbclient_tool
+from cerberus.sdk.agents.tool import FunctionTool
 
 
 def test_smb_wrappers_are_function_tools():

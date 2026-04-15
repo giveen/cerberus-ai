@@ -3,7 +3,7 @@
 Tool to create GIF recordings of JSONL replay files.
 
 Usage:
-    cai-gif path/to/file.jsonl 0.5 output.gif
+    cerberus-gif path/to/file.jsonl 0.5 output.gif
 
 This tool wraps asciinema recording and agg to create GIF animations.
 """
@@ -21,8 +21,8 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  cai-gif path/to/file.jsonl 0.5 output.gif
-  cai-gif conversation.jsonl 1.0 demo.gif
+  cerberus-gif path/to/file.jsonl 0.5 output.gif
+  cerberus-gif conversation.jsonl 1.0 demo.gif
 """
     )
 

@@ -10,7 +10,7 @@ on:
     paths:
       - 'benchmarks/**'
       - '.github/workflows/benchmarks.yml'
-      - 'src/cai/rag/**'
+      - 'src/cerberus/rag/**'
 
 jobs:
   run-benchmarks:

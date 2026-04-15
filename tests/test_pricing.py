@@ -20,7 +20,7 @@ except ImportError:
 # Add the src directory to the Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from cai.util import COST_TRACKER, calculate_model_cost
+from cerberus.util import COST_TRACKER, calculate_model_cost
 
 
 def reset_test_state():
@@ -186,7 +186,7 @@ def test_private_model_alias0_with_pricing_json():
         pricing_path = Path(tmpdir) / "pricing.json"
         pricing_path.write_text(json.dumps(pricing_config), encoding="utf-8")
 
-        with patch.dict(os.environ, {"CEREBRO_PRICING_JSON": str(pricing_path)}, clear=False):
+        with patch.dict(os.environ, {"CERBERUS_PRICING_JSON": str(pricing_path)}, clear=False):
             pricing = COST_TRACKER.get_model_pricing("alias0")
             cost = calculate_model_cost("alias0", 100, 50)
 
@@ -324,7 +324,7 @@ def test_model_not_in_pricing_json_falls_back_to_litellm():
         pricing_path = Path(tmpdir) / "pricing.json"
         pricing_path.write_text(json.dumps(pricing_config), encoding="utf-8")
 
-        with patch.dict(os.environ, {"CEREBRO_PRICING_JSON": str(pricing_path)}, clear=False):
+        with patch.dict(os.environ, {"CERBERUS_PRICING_JSON": str(pricing_path)}, clear=False):
             with patch('requests.get') as mock_get:
                 # Mock LiteLLM API response for gpt-4
                 mock_response = MagicMock()

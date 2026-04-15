@@ -9,7 +9,7 @@ from openai.types.responses import (
     ResponseOutputText,
 )
 
-from cai.sdk.agents import (
+from cerberus.sdk.agents import (
     Agent,
     FunctionTool,
     Handoff,

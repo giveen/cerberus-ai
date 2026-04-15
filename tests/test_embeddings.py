@@ -1,7 +1,7 @@
 import math
 import pytest
 
-from cai.rag.embeddings import (
+from cerberus.rag.embeddings import (
     LocalDeterministicEmbeddingsProvider,
     get_embeddings_provider,
 )
@@ -67,6 +67,6 @@ def test_factory_default_provider():
     assert hasattr(provider, "embed_texts")
     # Accept either the local deterministic provider or an OpenAI-backed
     # provider depending on the runtime environment and available keys.
-    from cai.rag.embeddings import OpenAIEmbeddingsProvider
+    from cerberus.rag.embeddings import OpenAIEmbeddingsProvider
 
     assert isinstance(provider, (LocalDeterministicEmbeddingsProvider, OpenAIEmbeddingsProvider))

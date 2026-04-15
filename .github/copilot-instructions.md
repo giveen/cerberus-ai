@@ -1,16 +1,18 @@
-<todos title="Cerberus AI Rebrand And Clean Break" rule="Review steps frequently throughout the conversation and DO NOT stop between steps unless they explicitly require it.">
-- [x] audit-identity-occurrences: Audit user-facing and documentary uses of CAI, Cybersecurity AI, and visible Cerebro branding while preserving structural package paths, runtime directories, and environment variable identifiers. 🔴
-  _Broad CAI matches are mostly imports, .cai paths, or config names. Visible Cerebro strings also need conversion for a coherent brand._
-- [-] update-branding-files: Update dashboard header, CLI and REPL user-facing strings, branding regression tests, README, and project metadata to use Cerberus AI branding. 🔴
-  _Target app/app.py, src/cai/cli.py, src/cai/repl/ui/*.py, src/cai/repl/commands/help.py, tests/cli/test_branding_regression.py, pyproject.toml, and README.md. Preserve src/cai imports and CEREBRO_* runtime identifiers unless only shown to the user._
-- [ ] create-license-and-gitignore: Create an MIT LICENSE file, normalize .gitignore, and ensure workspaces/.gitkeep is present under the requested ignore rules. 🔴
-  _Keep workspaces/* ignored while preserving workspaces/.gitkeep._
-- [ ] reinitialize-git-history: Delete the current .git directory, initialize a fresh repository, stage files under the new ignore rules, and create the genesis commit. 🔴
-  _Destructive step requested by user. Defer until content edits and validation are complete._
-- [ ] connect-and-push-remote: Add the new GitHub remote and push the fresh main branch to the cerberus-ai repository. 🔴
-  _May be blocked by credentials or remote permissions. Report exact blocker if push fails._
-- [ ] summarize-scrubbed-files: Provide a concise summary of the identity scrub and list the files updated during the Cerberus AI transition. 🟡
-  _Final response should summarize content edits and git/reset/push outcome._
+<todos title="Dockerfile multistage kali runtime" rule="Review steps frequently throughout the conversation and DO NOT stop between steps unless they explicitly require it.">
+- [x] inspect-current-docker-build: Inspect the active dockerized Dockerfile, compose targets, and prior repo notes to confirm the current stage layout and constraints before editing. 🔴
+  _Confirmed the compose services still target `frontend` and `runtime`, the active worktree uses the older four-stage Dockerfile shape, and prior notes about `unzip` plus Kali package conflicts still applied._
+- [x] refactor-dockerfile-stages: Refactor dockerized/Dockerfile into base, builder, frontend, and runtime stages with a Reflex frontend build and kalilinux/kali-rolling runtime. 🔴
+  _Rewrote the Dockerfile so `base` stays on `python:3.12-slim`, `builder` handles Node 20 and `reflex export`, `frontend` copies only the exported frontend plus minimal app/runtime pieces, and `runtime` stays on Kali with the requested meta-packages and tini entrypoint._
+- [x] verify-docker-targets: Validate the frontend and runtime targets, including entrypoint wiring and expected security tools in PATH. 🔴
+  _Validated with direct `docker build --target frontend` and `docker build --target runtime`, `docker inspect` for the tini entrypoint, and runtime probes for `nmap`, `msfconsole`, and `sqlmap`; `nmap --version` required a privileged run, which matches the compose runtime configuration._
+- [x] run-compose-stack-validation: Bring up the full docker compose runtime profile stack and verify the dashboard and Kali runtime services together in the live compose environment. 🔴
+  _`docker compose -f dockerized/docker-compose.yml --profile runtime up -d --build` now leaves both `cerberus-dashboard` and `cerberus` up, Playwright reaches the dashboard with HTTP 200, and runtime probes inside the live `cerberus` container confirm the CLI plus `nmap`, `msfconsole`, and `sqlmap` are available together._
+- [ ] refactor-ui-components-presentational: Refactor UI components into presentational modules. 🟡
+  _Existing follow-up from the dashboard redesign work._
+- [ ] add-playwright-layout-tests: Add Playwright E2E tests for layouts covering 0-4 sessions. 🟡
+  _Existing follow-up from the dashboard redesign work._
+- [ ] update-build-export-docs-and-ci: Update build/export docs and CI for reflex export validation. 🟡
+  _Existing follow-up from the dashboard redesign work._
 </todos>
 
 <!-- Auto-generated todo section -->

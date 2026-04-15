@@ -13,10 +13,10 @@ from unittest.mock import patch, Mock, MagicMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 
                                 '..', '..', 'src'))
 
-from cai.repl.commands.config import (
+from cerberus.repl.commands.config import (
     ConfigCommand, ENV_VARS, get_env_var_value, set_env_var
 )
-from cai.repl.commands.base import Command
+from cerberus.repl.commands.base import Command
 
 
 class TestConfigCommand:
@@ -26,8 +26,8 @@ class TestConfigCommand:
     def setup_and_cleanup(self):
         """Setup and cleanup for each test."""
         # Set up test environment
-        os.environ['CEREBRO_TELEMETRY'] = 'false'
-        os.environ['CEREBRO_TRACING'] = 'false'
+        os.environ['CERBERUS_TELEMETRY'] = 'false'
+        os.environ['CERBERUS_TRACING'] = 'false'
         
         # Store original values of environment variables we'll modify
         self.original_env_vars = {}
@@ -82,22 +82,22 @@ class TestConfigCommand:
     def test_get_env_var_value_with_set_value(self):
         """Test getting environment variable value when it's set."""
         # Set a test value
-        os.environ["CEREBRO_MODEL"] = "test-model"
+        os.environ["CERBERUS_MODEL"] = "test-model"
         
-        result = get_env_var_value("CEREBRO_MODEL")
+        result = get_env_var_value("CERBERUS_MODEL")
         assert result == "test-model"
     
     def test_get_env_var_value_with_default(self):
         """Test getting environment variable value when it's not set (returns default)."""
         # Make sure the variable is not set
-        if "CEREBRO_MODEL" in os.environ:
-            del os.environ["CEREBRO_MODEL"]
+        if "CERBERUS_MODEL" in os.environ:
+            del os.environ["CERBERUS_MODEL"]
         
-        result = get_env_var_value("CEREBRO_MODEL")
+        result = get_env_var_value("CERBERUS_MODEL")
         # Should return the default value from ENV_VARS
         expected_default = None
         for var_info in ENV_VARS.values():
-            if var_info["name"] == "CEREBRO_MODEL":
+            if var_info["name"] == "CERBERUS_MODEL":
                 expected_default = var_info["default"]
                 break
         
@@ -130,7 +130,7 @@ class TestConfigCommand:
     
     def test_handle_get_valid_number(self, config_command):
         """Test getting a variable by valid number."""
-        # Test with variable number 6 (CEREBRO_MODEL)
+        # Test with variable number 6 (CERBERUS_MODEL)
         result = config_command.handle_get(["6"])
         assert result is True
     
@@ -151,10 +151,10 @@ class TestConfigCommand:
     
     def test_handle_set_valid_number_and_value(self, config_command):
         """Test setting a variable by valid number and value."""
-        # Test with variable number 6 (CEREBRO_MODEL)
+        # Test with variable number 6 (CERBERUS_MODEL)
         result = config_command.handle_set(["6", "new-test-model"])
         assert result is True
-        assert os.environ.get("CEREBRO_MODEL") == "new-test-model"
+        assert os.environ.get("CERBERUS_MODEL") == "new-test-model"
     
     def test_handle_set_invalid_number(self, config_command):
         """Test setting a variable by invalid number."""
@@ -180,13 +180,13 @@ class TestConfigCommand:
         """Test setting a variable with value containing spaces."""
         result = config_command.handle_set(["6", "model with spaces"])
         assert result is True
-        assert os.environ.get("CEREBRO_MODEL") == "model with spaces"
+        assert os.environ.get("CERBERUS_MODEL") == "model with spaces"
     
     def test_handle_set_empty_value(self, config_command):
         """Test setting a variable with empty value."""
         result = config_command.handle_set(["6", ""])
         assert result is True
-        assert os.environ.get("CEREBRO_MODEL") == ""
+        assert os.environ.get("CERBERUS_MODEL") == ""
     
     def test_command_base_functionality(self, config_command):
         """Test that the command inherits from base Command properly."""
@@ -211,7 +211,7 @@ class TestConfigCommand:
         # Test routing to set
         result4 = config_command.handle(["set", "6", "test-value"])
         assert result4 is True
-        assert os.environ.get("CEREBRO_MODEL") == "test-value"
+        assert os.environ.get("CERBERUS_MODEL") == "test-value"
     
     def test_handle_unknown_subcommand(self, config_command):
         """Test handling of unknown subcommands."""
@@ -221,8 +221,8 @@ class TestConfigCommand:
     def test_specific_env_vars_exist(self):
         """Test that specific important environment variables are defined."""
         important_vars = [
-            "CEREBRO_MODEL", "CEREBRO_DEBUG", "CEREBRO_BRIEF", "CEREBRO_MAX_TURNS",
-            "CEREBRO_TRACING", "CEREBRO_AGENT_TYPE", "CTF_NAME", "CTF_CHALLENGE"
+            "CERBERUS_MODEL", "CERBERUS_DEBUG", "CERBERUS_BRIEF", "CERBERUS_MAX_TURNS",
+            "CERBERUS_TRACING", "CERBERUS_AGENT_TYPE", "CTF_NAME", "CTF_CHALLENGE"
         ]
         
         defined_var_names = [var_info["name"] for var_info in ENV_VARS.values()]
@@ -289,14 +289,14 @@ class TestConfigCommandIntegration:
         result1 = cmd.handle(["list"])
         assert result1 is True
         
-        # Get a specific variable (CEREBRO_MODEL - number 6)
+        # Get a specific variable (CERBERUS_MODEL - number 6)
         result2 = cmd.handle(["get", "6"])
         assert result2 is True
         
         # Set the variable to a new value
         result3 = cmd.handle(["set", "6", "integration-test-model"])
         assert result3 is True
-        assert os.environ.get("CEREBRO_MODEL") == "integration-test-model"
+        assert os.environ.get("CERBERUS_MODEL") == "integration-test-model"
         
         # Get the variable again to verify it changed
         result4 = cmd.handle(["get", "6"])
@@ -304,7 +304,7 @@ class TestConfigCommandIntegration:
         
         # Set it back to default (if it had a default)
         for var_info in ENV_VARS.values():
-            if var_info["name"] == "CEREBRO_MODEL" and var_info["default"]:
+            if var_info["name"] == "CERBERUS_MODEL" and var_info["default"]:
                 result5 = cmd.handle(["set", "6", var_info["default"]])
                 assert result5 is True
                 break
@@ -315,9 +315,9 @@ class TestConfigCommandIntegration:
         
         # Modify several variables
         modifications = [
-            ("6", "test-model"),      # CEREBRO_MODEL
-            ("7", "2"),               # CEREBRO_DEBUG
-            ("8", "true"),            # CEREBRO_BRIEF
+            ("6", "test-model"),      # CERBERUS_MODEL
+            ("7", "2"),               # CERBERUS_DEBUG
+            ("8", "true"),            # CERBERUS_BRIEF
         ]
         
         for var_num, value in modifications:

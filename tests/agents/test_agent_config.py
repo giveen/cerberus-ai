@@ -1,7 +1,7 @@
 import pytest
 from pydantic import BaseModel
 
-from cai.sdk.agents import Agent, Handoff, RunContextWrapper, Runner, handoff
+from cerberus.sdk.agents import Agent, Handoff, RunContextWrapper, Runner, handoff
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,11 @@ class TimeElapsedColumn:
         _ = args, kwargs
 
 
+class MofNCompleteColumn:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        _ = args, kwargs
+
+
 class Progress:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         _ = args, kwargs

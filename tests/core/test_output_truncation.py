@@ -1,11 +1,11 @@
-from cai.sdk.agents._run_impl import truncate_output
-from cai.tools.runners.docker import CerebroDockerTool
+from cerberus.sdk.agents._run_impl import truncate_output
+from cerberus.tools.runners.docker import CerebroDockerTool
 
 
 def test_model_truncate_output_inserts_summary_marker_for_large_payload(monkeypatch):
-    monkeypatch.setenv("CEREBRO_TOOL_OUTPUT_MODEL_MAX_CHARS", "2000")
-    monkeypatch.setenv("CEREBRO_TOOL_OUTPUT_MODEL_HEAD_CHARS", "900")
-    monkeypatch.setenv("CEREBRO_TOOL_OUTPUT_MODEL_TAIL_CHARS", "900")
+    monkeypatch.setenv("CERBERUS_TOOL_OUTPUT_MODEL_MAX_CHARS", "2000")
+    monkeypatch.setenv("CERBERUS_TOOL_OUTPUT_MODEL_HEAD_CHARS", "900")
+    monkeypatch.setenv("CERBERUS_TOOL_OUTPUT_MODEL_TAIL_CHARS", "900")
 
     payload = "A" * 50_000
     result = truncate_output(payload)

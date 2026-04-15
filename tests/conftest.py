@@ -3,11 +3,11 @@ from __future__ import annotations
 import os
 import pytest
 
-from cai.sdk.agents.models import _openai_shared
-from cai.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
-from cai.sdk.agents.models.openai_responses import OpenAIResponsesModel
-from cai.sdk.agents.tracing import set_trace_processors
-from cai.sdk.agents.tracing.setup import GLOBAL_TRACE_PROVIDER
+from cerberus.sdk.agents.models import _openai_shared
+from cerberus.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+from cerberus.sdk.agents.models.openai_responses import OpenAIResponsesModel
+from cerberus.sdk.agents.tracing import set_trace_processors
+from cerberus.sdk.agents.tracing.setup import GLOBAL_TRACE_PROVIDER
 
 from tests.testing_processor import SPAN_PROCESSOR_TESTING
 
@@ -43,14 +43,14 @@ def shutdown_trace_provider():
 
 @pytest.fixture(autouse=True)
 def ensure_guardrails_enabled(monkeypatch):
-    """Override CEREBRO_GUARDRAILS to 'true' for every test.
+    """Override CERBERUS_GUARDRAILS to 'true' for every test.
 
-    The ambient shell environment may have CEREBRO_GUARDRAILS=false for development
+    The ambient shell environment may have CERBERUS_GUARDRAILS=false for development
     purposes.  Tests that specifically need it disabled call
-    monkeypatch.setenv("CEREBRO_GUARDRAILS", "false") themselves, which overrides
+    monkeypatch.setenv("CERBERUS_GUARDRAILS", "false") themselves, which overrides
     this fixture's setting for that single test.
     """
-    monkeypatch.setenv("CEREBRO_GUARDRAILS", "true")
+    monkeypatch.setenv("CERBERUS_GUARDRAILS", "true")
 
 
 @pytest.fixture(autouse=True)
@@ -81,11 +81,11 @@ def skip_integration_agent_tests(request):
 
 @pytest.fixture(autouse=True)
 def ensure_guardrails_enabled(monkeypatch):
-    """Override CEREBRO_GUARDRAILS to 'true' for every test.
+    """Override CERBERUS_GUARDRAILS to 'true' for every test.
 
-    The ambient shell environment may have CEREBRO_GUARDRAILS=false for development
+    The ambient shell environment may have CERBERUS_GUARDRAILS=false for development
     purposes.  Tests that specifically need it disabled call
-    monkeypatch.setenv("CEREBRO_GUARDRAILS", "false") themselves, which overrides
+    monkeypatch.setenv("CERBERUS_GUARDRAILS", "false") themselves, which overrides
     this fixture's setting for that single test.
     """
-    monkeypatch.setenv("CEREBRO_GUARDRAILS", "true")
+    monkeypatch.setenv("CERBERUS_GUARDRAILS", "true")

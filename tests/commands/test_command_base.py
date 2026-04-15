@@ -13,7 +13,7 @@ from unittest.mock import patch, Mock, MagicMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 
                                 '..', '..', 'src'))
 
-from cai.repl.commands.base import (
+from cerberus.repl.commands.base import (
     Command, COMMANDS, COMMAND_ALIASES, 
     register_command, get_command, handle_command
 )

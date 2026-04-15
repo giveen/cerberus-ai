@@ -1,4 +1,4 @@
-from cai.tools import validation
+from cerberus.tools import validation
 
 
 def test_contains_shell_metacharacters():

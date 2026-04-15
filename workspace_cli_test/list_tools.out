@@ -1,5 +1,5 @@
-TRACE_DEBUG: SynchronousMultiTracingProcessor added processor <cai.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x793bb0f1a630>
-TRACE_DEBUG: TraceProvider.register_processor called with <cai.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x793bb0f1a630>
+TRACE_DEBUG: SynchronousMultiTracingProcessor added processor <cerberus.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x793bb0f1a630>
+TRACE_DEBUG: TraceProvider.register_processor called with <cerberus.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x793bb0f1a630>
 [04/13/26 14:00:30] Level 25 A AUDIT validation_tool Validation gate passed     
 token  {"token_id": "vt_a90d7dbd9a864fce9c82a119787e0492", "created_at":        
        "2026-04-13T20:00:30.224889+00:00", "gate": "validate_resource_health",  

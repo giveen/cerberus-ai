@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from typing_extensions import TypedDict
 
-from cai.sdk.agents import Agent, RunContextWrapper, RunHooks, Runner, TContext, Tool
+from cerberus.sdk.agents import Agent, RunContextWrapper, RunHooks, Runner, TContext, Tool
 
 from tests.fake_model import FakeModel
 from tests.core.test_responses import (

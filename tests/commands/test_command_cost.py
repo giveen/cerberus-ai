@@ -9,8 +9,8 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from cai.repl.commands.cost import CostCommand
-from cai.sdk.agents.global_usage_tracker import GlobalUsageTracker
+from cerberus.repl.commands.cost import CostCommand
+from cerberus.sdk.agents.global_usage_tracker import GlobalUsageTracker
 
 
 class TestCostCommand:
@@ -24,7 +24,7 @@ class TestCostCommand:
     @pytest.fixture
     def mock_console(self):
         """Mock the console for testing output."""
-        with patch("cai.repl.commands.cost.console") as mock:
+        with patch("cerberus.repl.commands.cost.console") as mock:
             # Set default width for console
             mock.width = 80
             yield mock
@@ -155,9 +155,9 @@ class TestCostCommand:
             # Restore original handler
             cost_command.subcommands["models"]["handler"] = original_handler
 
-    @patch('cai.repl.commands.cost.console')
-    @patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER')
-    @patch('cai.repl.commands.cost.COST_TRACKER')
+    @patch('cerberus.repl.commands.cost.console')
+    @patch('cerberus.repl.commands.cost.GLOBAL_USAGE_TRACKER')
+    @patch('cerberus.repl.commands.cost.COST_TRACKER')
     def test_handle_summary_with_data(self, mock_cost_tracker, mock_global_tracker, 
                                      mock_console_direct, cost_command, mock_console, temp_usage_file):
         """Test handle_summary with actual usage data."""
@@ -196,7 +196,7 @@ class TestCostCommand:
         assert mock_console_direct.print.called
         assert mock_console_direct.print.call_count >= 2  # At least header prints
 
-    @patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER')
+    @patch('cerberus.repl.commands.cost.GLOBAL_USAGE_TRACKER')
     def test_handle_models_with_data(self, mock_global_tracker, cost_command, 
                                     mock_console, temp_usage_file):
         """Test handle_models with usage data."""
@@ -214,7 +214,7 @@ class TestCostCommand:
         print_calls = [str(call) for call in mock_console.print.call_args_list]
         assert any("Model Usage Statistics" in str(call) for call in print_calls)
 
-    @patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER')
+    @patch('cerberus.repl.commands.cost.GLOBAL_USAGE_TRACKER')
     def test_handle_daily_with_data(self, mock_global_tracker, cost_command, 
                                    mock_console, temp_usage_file):
         """Test handle_daily with usage data."""
@@ -232,7 +232,7 @@ class TestCostCommand:
         print_calls = [str(call) for call in mock_console.print.call_args_list]
         assert any("Daily Usage Statistics" in str(call) for call in print_calls)
 
-    @patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER')
+    @patch('cerberus.repl.commands.cost.GLOBAL_USAGE_TRACKER')
     def test_handle_sessions_with_data(self, mock_global_tracker, cost_command, 
                                       mock_console, temp_usage_file):
         """Test handle_sessions with usage data."""
@@ -250,7 +250,7 @@ class TestCostCommand:
         print_calls = [str(call) for call in mock_console.print.call_args_list]
         assert any("Recent" in str(call) and "Sessions" in str(call) for call in print_calls)
 
-    @patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER')
+    @patch('cerberus.repl.commands.cost.GLOBAL_USAGE_TRACKER')
     def test_handle_sessions_with_limit(self, mock_global_tracker, cost_command, 
                                        mock_console, temp_usage_file):
         """Test handle_sessions with a custom limit."""
@@ -280,12 +280,12 @@ class TestCostCommand:
         print_calls = [str(call) for call in mock_console.print.call_args_list]
         assert any("Recent 5 Sessions" in str(call) for call in print_calls)
 
-    @patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER')
+    @patch('cerberus.repl.commands.cost.GLOBAL_USAGE_TRACKER')
     def test_handle_reset_no_data(self, mock_global_tracker, cost_command, mock_console):
         """Test handle_reset when no usage data exists."""
         mock_global_tracker.enabled = True
         
-        with patch('cai.repl.commands.cost.Path') as mock_path:
+        with patch('cerberus.repl.commands.cost.Path') as mock_path:
             mock_path.home.return_value = Path("/home/test")
             mock_usage_file = MagicMock()
             mock_usage_file.exists.return_value = False
@@ -297,7 +297,7 @@ class TestCostCommand:
             # Verify appropriate message
             mock_console.print.assert_any_call("[yellow]No usage data to reset[/yellow]")
 
-    @patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER')
+    @patch('cerberus.repl.commands.cost.GLOBAL_USAGE_TRACKER')
     def test_handle_reset_with_confirmation(self, mock_global_tracker, cost_command, 
                                           mock_console, temp_usage_file):
         """Test handle_reset with user confirmation."""
@@ -312,14 +312,14 @@ class TestCostCommand:
         # Mock user input for confirmation
         mock_console.input.return_value = "RESET"
         
-        with patch('cai.repl.commands.cost.Path') as mock_path:
+        with patch('cerberus.repl.commands.cost.Path') as mock_path:
             mock_path.home.return_value = Path(tempfile.gettempdir())
             mock_usage_file = MagicMock()
             mock_usage_file.exists.return_value = True
             mock_usage_file.with_name.return_value = Path("/tmp/backup.json")
             mock_path.return_value.__truediv__.return_value.__truediv__.return_value = mock_usage_file
             
-            with patch('cai.repl.commands.cost.shutil.copy2') as mock_copy:
+            with patch('cerberus.repl.commands.cost.shutil.copy2') as mock_copy:
                 result = cost_command.handle_reset()
                 assert result is True
                 
@@ -332,7 +332,7 @@ class TestCostCommand:
                 # Verify success message
                 assert any("reset" in str(call).lower() for call in mock_console.print.call_args_list)
 
-    @patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER')
+    @patch('cerberus.repl.commands.cost.GLOBAL_USAGE_TRACKER')
     def test_handle_reset_cancelled(self, mock_global_tracker, cost_command, 
                                    mock_console, temp_usage_file):
         """Test handle_reset when user cancels."""
@@ -347,7 +347,7 @@ class TestCostCommand:
         # Mock user input for cancellation
         mock_console.input.return_value = "no"
         
-        with patch('cai.repl.commands.cost.Path') as mock_path:
+        with patch('cerberus.repl.commands.cost.Path') as mock_path:
             mock_path.home.return_value = Path(tempfile.gettempdir())
             mock_usage_file = MagicMock()
             mock_usage_file.exists.return_value = True
@@ -362,7 +362,7 @@ class TestCostCommand:
             # Verify cancellation message
             mock_console.print.assert_any_call("[yellow]Reset cancelled[/yellow]")
 
-    @patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER')
+    @patch('cerberus.repl.commands.cost.GLOBAL_USAGE_TRACKER')
     def test_tracking_disabled(self, mock_global_tracker, cost_command, mock_console):
         """Test behavior when tracking is disabled."""
         mock_global_tracker.enabled = False
@@ -376,7 +376,7 @@ class TestCostCommand:
 
     def test_get_session_summary(self, cost_command):
         """Test _get_session_summary method."""
-        with patch('cai.repl.commands.cost.COST_TRACKER') as mock_tracker:
+        with patch('cerberus.repl.commands.cost.COST_TRACKER') as mock_tracker:
             mock_tracker.session_total_cost = 0.5
             mock_tracker.current_agent_total_cost = 0.2
             mock_tracker.current_agent_input_tokens = 1000
@@ -392,17 +392,17 @@ class TestCostCommand:
 
     def test_get_global_summary_disabled(self, cost_command):
         """Test _get_global_summary when tracking is disabled."""
-        with patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER') as mock_tracker:
+        with patch('cerberus.repl.commands.cost.GLOBAL_USAGE_TRACKER') as mock_tracker:
             mock_tracker.enabled = False
             
             summary = cost_command._get_global_summary()
             
             assert "Usage tracking is disabled" in summary
-            assert "CEREBRO_DISABLE_USAGE_TRACKING=false" in summary
+            assert "CERBERUS_DISABLE_USAGE_TRACKING=false" in summary
 
     def test_show_top_models_mini(self, cost_command, mock_console):
         """Test _show_top_models_mini method."""
-        with patch('cai.repl.commands.cost.GLOBAL_USAGE_TRACKER') as mock_tracker:
+        with patch('cerberus.repl.commands.cost.GLOBAL_USAGE_TRACKER') as mock_tracker:
             mock_tracker.enabled = True
             mock_tracker.get_summary.return_value = {
                 "top_models": [

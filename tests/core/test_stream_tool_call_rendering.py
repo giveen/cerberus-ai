@@ -6,8 +6,8 @@ import pytest
 from openai import AsyncOpenAI
 from openai.types.responses import Response
 
-from cai.sdk.agents.model_settings import ModelSettings
-from cai.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+from cerberus.sdk.agents.model_settings import ModelSettings
+from cerberus.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 
 
 # Keep a direct reference so autouse fixtures that monkeypatch the class method
@@ -31,7 +31,7 @@ async def test_streamed_tool_call_renders_once_after_finalized(monkeypatch: pyte
         calls.append({"messages": list(messages), "title": title})
 
     monkeypatch.setattr(
-        "cai.sdk.agents.models.openai_chatcompletions.cli_print_agent_messages",
+        "cerberus.sdk.agents.models.openai_chatcompletions.cli_print_agent_messages",
         _capture_cli_print,
     )
 

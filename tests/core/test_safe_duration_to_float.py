@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cai.util import safe_duration_to_float
+from cerberus.util import safe_duration_to_float
 
 
 def test_safe_duration_to_float_accepts_numeric_values():

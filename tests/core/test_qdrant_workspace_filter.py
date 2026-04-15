@@ -1,4 +1,4 @@
-from cai.rag.vector_db_adapter import QdrantAdapter
+from cerberus.rag.vector_db_adapter import QdrantAdapter
 
 
 class _FakeQdrantClient:
@@ -44,8 +44,8 @@ class _FakeQdrantClient:
 
 
 def test_qdrant_search_filters_results_by_active_workspace(monkeypatch):
-    monkeypatch.setenv("CEREBRO_WORKSPACE_ACTIVE_ROOT", "/workspace/workspaces/target-a")
-    monkeypatch.setenv("CEREBRO_WORKSPACE", "target-a")
+    monkeypatch.setenv("CERBERUS_WORKSPACE_ACTIVE_ROOT", "/workspace/workspaces/target-a")
+    monkeypatch.setenv("CERBERUS_WORKSPACE", "target-a")
 
     adapter = QdrantAdapter(client=_FakeQdrantClient())
     result = adapter.search(collection_name="_all_", query_text="findings", limit=10)
@@ -56,9 +56,9 @@ def test_qdrant_search_filters_results_by_active_workspace(monkeypatch):
 
 
 def test_qdrant_add_points_enriches_workspace_scope(monkeypatch):
-    monkeypatch.setenv("CEREBRO_WORKSPACE_ACTIVE_ROOT", "/workspace/workspaces/target-a")
-    monkeypatch.setenv("CEREBRO_WORKSPACE", "target-a")
-    monkeypatch.setenv("CEREBRO_SESSION_ID", "sess-a")
+    monkeypatch.setenv("CERBERUS_WORKSPACE_ACTIVE_ROOT", "/workspace/workspaces/target-a")
+    monkeypatch.setenv("CERBERUS_WORKSPACE", "target-a")
+    monkeypatch.setenv("CERBERUS_SESSION_ID", "sess-a")
 
     client = _FakeQdrantClient()
     adapter = QdrantAdapter(client=client)

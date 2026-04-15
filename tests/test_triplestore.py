@@ -1,6 +1,6 @@
 import time
 
-from cai.rag.triplestore import TripleStore
+from cerberus.rag.triplestore import TripleStore
 
 
 def test_add_and_query():

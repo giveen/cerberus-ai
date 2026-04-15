@@ -17,13 +17,13 @@ from openai.types.responses import (
     ResponseOutputText,
 )
 
-from cai.sdk.agents.model_settings import ModelSettings
-from cai.sdk.agents.models.interface import ModelTracing
-from cai.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
-from cai.sdk.agents.models.openai_provider import OpenAIProvider
+from cerberus.sdk.agents.model_settings import ModelSettings
+from cerberus.sdk.agents.models.interface import ModelTracing
+from cerberus.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+from cerberus.sdk.agents.models.openai_provider import OpenAIProvider
 
 import os
-cai_model = os.getenv('CEREBRO_MODEL', "qwen2.5:14b")
+cai_model = os.getenv('CERBERUS_MODEL', "qwen2.5:14b")
 
 @pytest.mark.allow_call_model_methods
 @pytest.mark.asyncio

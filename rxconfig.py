@@ -1,10 +1,18 @@
+import os
+
 import reflex as rx
+from reflex.constants import StateManagerMode
 from reflex.plugins.sitemap import SitemapPlugin
 
 
+REDIS_URL = os.getenv("REDIS_URL", "").strip() or os.getenv("REFLEX_REDIS_URL", "").strip()
+
+
 config = rx.Config(
-    app_name="app",
-    frontend_port=3000,
-    backend_port=8000,
+    app_name="cerberus_dashboard",
+    frontend_port=8000,
+    backend_port=8001,
+    redis_url=REDIS_URL or None,
+    state_manager_mode=StateManagerMode.REDIS if REDIS_URL else StateManagerMode.DISK,
     disable_plugins=[SitemapPlugin],
 )

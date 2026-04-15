@@ -3,8 +3,8 @@
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
 
-from cai.agents import get_agent_by_name
-from cai.repl.commands.mcp import (
+from cerberus.agents import get_agent_by_name
+from cerberus.repl.commands.mcp import (
     MCPCommand,
     _GLOBAL_MCP_SERVERS,
     _AGENT_MCP_ASSOCIATIONS,
@@ -12,8 +12,8 @@ from cai.repl.commands.mcp import (
     get_mcp_servers_for_agent,
     get_mcp_tools_for_agent,
 )
-from cai.sdk.agents import Agent
-from cai.sdk.agents.tool import FunctionTool
+from cerberus.sdk.agents import Agent
+from cerberus.sdk.agents.tool import FunctionTool
 
 
 class TestMCPPersistence:
@@ -54,7 +54,7 @@ class TestMCPPersistence:
         servers = get_mcp_servers_for_agent(agent_name)
         assert servers.count(server_name) == 1
 
-    @patch("cai.agents.get_available_agents")
+    @patch("cerberus.agents.get_available_agents")
     def test_agent_retrieval_includes_mcp_tools(self, mock_get_available):
         """Test that retrieving an agent includes associated MCP tools."""
         # Create a mock agent
@@ -120,7 +120,7 @@ class TestMCPPersistence:
         _GLOBAL_MCP_SERVERS["server2"] = mock_server2
         
         # Test associations display
-        with patch("cai.repl.commands.mcp.console") as mock_console:
+        with patch("cerberus.repl.commands.mcp.console") as mock_console:
             result = cmd.handle_associations()
             assert result is True
             # Should print a table

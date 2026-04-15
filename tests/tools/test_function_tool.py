@@ -5,8 +5,8 @@ import pytest
 from pydantic import BaseModel
 from typing_extensions import TypedDict
 
-from cai.sdk.agents import FunctionTool, ModelBehaviorError, RunContextWrapper, function_tool
-from cai.sdk.agents.tool import default_tool_error_function
+from cerberus.sdk.agents import FunctionTool, ModelBehaviorError, RunContextWrapper, function_tool
+from cerberus.sdk.agents.tool import default_tool_error_function
 
 
 def argless_function() -> str:

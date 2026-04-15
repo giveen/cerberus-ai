@@ -20,8 +20,8 @@ from openai.types.chat.chat_completion_message_tool_call import (
 )
 from openai.types.completion_usage import CompletionUsage
 
-from cai.sdk.agents import Agent, ModelResponse, OpenAIChatCompletionsModel
-from cai.sdk.agents.models.openai_chatcompletions import (
+from cerberus.sdk.agents import Agent, ModelResponse, OpenAIChatCompletionsModel
+from cerberus.sdk.agents.models.openai_chatcompletions import (
     get_agent_message_history,
     get_all_agent_histories,
     ACTIVE_MODEL_INSTANCES,
@@ -103,13 +103,13 @@ class BaseCLITest:
     def setup_class(cls):
         """Set up test environment."""
         # Disable external services for testing
-        os.environ["CEREBRO_TELEMETRY"] = "false"
-        os.environ["CEREBRO_TRACING"] = "false"
-        os.environ["CEREBRO_STREAM"] = "false"
-        os.environ["CEREBRO_MAX_TURNS"] = "5"
+        os.environ["CERBERUS_TELEMETRY"] = "false"
+        os.environ["CERBERUS_TRACING"] = "false"
+        os.environ["CERBERUS_STREAM"] = "false"
+        os.environ["CERBERUS_MAX_TURNS"] = "5"
 
         # Ensure we're using a test model
-        os.environ["CEREBRO_MODEL"] = "test-model"
+        os.environ["CERBERUS_MODEL"] = "test-model"
 
         # Disable any CTF components
         os.environ.pop("CTF_NAME", None)
@@ -196,7 +196,7 @@ class BaseCLITest:
         self, content: str = "Test response", items: Optional[List] = None
     ) -> ModelResponse:
         """Create a mock ModelResponse for Runner.run."""
-        from cai.sdk.agents.usage import Usage
+        from cerberus.sdk.agents.usage import Usage
 
         return ModelResponse(
             output=items or [],
@@ -309,7 +309,7 @@ class BaseCLITest:
             Dict with simulation results and verification data
         """
         # Set streaming mode
-        os.environ["CEREBRO_STREAM"] = "true" if stream_mode else "false"
+        os.environ["CERBERUS_STREAM"] = "true" if stream_mode else "false"
 
         # Prepare mock responses
         mock_responses = []
@@ -339,44 +339,44 @@ class BaseCLITest:
         # Enhanced mocking for CLI components
         mock_patches = [
             # Core CLI input/output
-            patch("cai.repl.ui.prompt.get_user_input", side_effect=input_simulator),
-            patch("cai.repl.ui.logging.setup_session_logging", return_value="test_history.txt"),
+            patch("cerberus.repl.ui.prompt.get_user_input", side_effect=input_simulator),
+            patch("cerberus.repl.ui.logging.setup_session_logging", return_value="test_history.txt"),
             # Session recording
-            patch("cai.sdk.agents.run_to_jsonl.get_session_recorder"),
+            patch("cerberus.sdk.agents.run_to_jsonl.get_session_recorder"),
             # CLI UI components
-            patch("cai.repl.commands.FuzzyCommandCompleter"),
-            patch("cai.repl.ui.keybindings.create_key_bindings"),
-            patch("cai.repl.ui.banner.display_banner"),
-            patch("cai.repl.ui.banner.display_quick_guide"),
+            patch("cerberus.repl.commands.FuzzyCommandCompleter"),
+            patch("cerberus.repl.ui.keybindings.create_key_bindings"),
+            patch("cerberus.repl.ui.banner.display_banner"),
+            patch("cerberus.repl.ui.banner.display_quick_guide"),
             # LLM calls
             patch("litellm.completion", side_effect=litellm_simulator),
             patch("litellm.acompletion", side_effect=litellm_simulator),
             # Timing functions
-            patch("cai.util.start_idle_timer"),
-            patch("cai.util.stop_idle_timer"),
-            patch("cai.util.start_active_timer"),
-            patch("cai.util.stop_active_timer"),
-            patch("cai.util.get_active_time_seconds", return_value=1.0),
-            patch("cai.util.get_idle_time_seconds", return_value=2.0),
+            patch("cerberus.util.start_idle_timer"),
+            patch("cerberus.util.stop_idle_timer"),
+            patch("cerberus.util.start_active_timer"),
+            patch("cerberus.util.stop_active_timer"),
+            patch("cerberus.util.get_active_time_seconds", return_value=1.0),
+            patch("cerberus.util.get_idle_time_seconds", return_value=2.0),
             # Rich console output
             patch("rich.console.Console.print"),
         ]
 
         # Apply all patches and run simulation
-        from cai.cli import run_cai_cli
+        from cerberus.cli import run_cai_cli
 
         def apply_patches_and_run():
             with (
-                patch.multiple("cai.repl.ui.prompt", get_user_input=input_simulator),
+                patch.multiple("cerberus.repl.ui.prompt", get_user_input=input_simulator),
                 patch.multiple(
                     "litellm", completion=litellm_simulator, acompletion=litellm_simulator
                 ),
                 patch.multiple(
-                    "cai.repl.ui.logging",
+                    "cerberus.repl.ui.logging",
                     setup_session_logging=Mock(return_value="test_history.txt"),
                 ),
                 patch.multiple(
-                    "cai.sdk.agents.run_to_jsonl",
+                    "cerberus.sdk.agents.run_to_jsonl",
                     get_session_recorder=Mock(
                         return_value=Mock(
                             filename="test_session.jsonl",
@@ -387,13 +387,13 @@ class BaseCLITest:
                         )
                     ),
                 ),
-                patch.multiple("cai.repl.commands", FuzzyCommandCompleter=Mock()),
-                patch.multiple("cai.repl.ui.keybindings", create_key_bindings=Mock()),
+                patch.multiple("cerberus.repl.commands", FuzzyCommandCompleter=Mock()),
+                patch.multiple("cerberus.repl.ui.keybindings", create_key_bindings=Mock()),
                 patch.multiple(
-                    "cai.repl.ui.banner", display_banner=Mock(), display_quick_guide=Mock()
+                    "cerberus.repl.ui.banner", display_banner=Mock(), display_quick_guide=Mock()
                 ),
                 patch.multiple(
-                    "cai.util",
+                    "cerberus.util",
                     start_idle_timer=Mock(),
                     stop_idle_timer=Mock(),
                     start_active_timer=Mock(),

@@ -1,7 +1,7 @@
 import pytest
 
-from cai.sdk.agents import Agent, ModelSettings, Runner
-from cai.sdk.agents._run_impl import AgentToolUseTracker, RunImpl
+from cerberus.sdk.agents import Agent, ModelSettings, Runner
+from cerberus.sdk.agents._run_impl import AgentToolUseTracker, RunImpl
 
 from tests.fake_model import FakeModel
 from tests.core.test_responses import get_function_tool, get_function_tool_call, get_text_message

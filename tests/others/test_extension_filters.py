@@ -1,8 +1,8 @@
 from openai.types.responses import ResponseOutputMessage, ResponseOutputText
 
-from cai.sdk.agents import Agent, HandoffInputData
-from cai.sdk.agents.extensions.handoff_filters import remove_all_tools
-from cai.sdk.agents.items import (
+from cerberus.sdk.agents import Agent, HandoffInputData
+from cerberus.sdk.agents.extensions.handoff_filters import remove_all_tools
+from cerberus.sdk.agents.items import (
     HandoffOutputItem,
     MessageOutputItem,
     ToolCallOutputItem,

@@ -415,8 +415,8 @@ def get_location(ip):
     return 42.85, -2.67
 
 def get_overall_stats():
-    """Fetch overall download statistics for cai-framework"""
-    url = "https://pypistats.org/api/packages/cai-framework/overall"
+    """Fetch overall download statistics for cerberus-ai."""
+    url = "https://pypistats.org/api/packages/cerberus-ai/overall"
     response = requests.get(url)
     if response.status_code == 200:
         return response.json()
@@ -425,8 +425,8 @@ def get_overall_stats():
         return None
 
 def get_system_stats():
-    """Fetch system-specific download statistics for cai-framework"""
-    url = "https://pypistats.org/api/packages/cai-framework/system"
+    """Fetch system-specific download statistics for cerberus-ai."""
+    url = "https://pypistats.org/api/packages/cerberus-ai/system"
     response = requests.get(url) 
     if response.status_code == 200:
         return response.json()
@@ -515,7 +515,7 @@ def create_pypi_plot():
     # Add padding between x-axis and the date labels
     ax1.tick_params(axis='x', which='major', pad=10)
     
-    ax1.set_title('CAI Framework Download Statistics', fontsize=14, pad=20)
+    ax1.set_title('Cerberus AI Engine Download Statistics', fontsize=14, pad=20)
     ax1.set_ylabel('Total Cumulative Downloads', fontsize=14, color='black')
     ax2.set_ylabel('Daily Downloads by System', fontsize=14, color='black')
     ax1.set_xlabel('Date', fontsize=14)

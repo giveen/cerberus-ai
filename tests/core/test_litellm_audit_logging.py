@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from cai.sdk.agents.exceptions import UserError
-from cai.sdk.agents.model_settings import ModelSettings
-from cai.sdk.agents.models import openai_chatcompletions as occ
+from cerberus.sdk.agents.exceptions import UserError
+from cerberus.sdk.agents.model_settings import ModelSettings
+from cerberus.sdk.agents.models import openai_chatcompletions as occ
 
 
 class _AuditRecorder:
@@ -30,7 +30,7 @@ async def test_litellm_bad_request_logs_sanitized_audit(monkeypatch):
     monkeypatch.setattr(occ, "LiteLLMBadRequestError", RuntimeError)
     monkeypatch.setattr(occ.litellm, "acompletion", _raise_bad_request)
 
-    import cai.repl.ui.logging as logging_module
+    import cerberus.repl.ui.logging as logging_module
 
     monkeypatch.setattr(logging_module, "get_cerebro_logger", _fake_logger)
 

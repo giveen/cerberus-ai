@@ -1,3 +1,7 @@
+assets/external/
+.states
+.web
+*.db
 # Operating system and editors
 .DS_Store
 .idea/
@@ -58,6 +62,8 @@ benchmarks/outputs/
 data/
 dockerized/logs/
 dockerized/qdrant_data/
+dockerized/volumes/*
+!dockerized/volumes/.gitkeep
 .pytest_failures/
 workspaces/*
 !workspaces/.gitkeep

@@ -13,9 +13,9 @@ from unittest.mock import patch, Mock, MagicMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 
                                 '..', '..', 'src'))
 
-from cai.repl.commands.parallel import ParallelCommand, ParallelConfig
-import cai.repl.commands.parallel as parallel_module
-from cai.repl.commands.base import Command
+from cerberus.repl.commands.parallel import ParallelCommand, ParallelConfig
+import cerberus.repl.commands.parallel as parallel_module
+from cerberus.repl.commands.base import Command
 
 
 class TestParallelCommand:
@@ -28,8 +28,8 @@ class TestParallelCommand:
         parallel_module.PARALLEL_CONFIGS.clear()
         
         # Set up test environment
-        os.environ['CEREBRO_TELEMETRY'] = 'false'
-        os.environ['CEREBRO_TRACING'] = 'false'
+        os.environ['CERBERUS_TELEMETRY'] = 'false'
+        os.environ['CERBERUS_TRACING'] = 'false'
         
         yield
         
@@ -88,7 +88,7 @@ class TestParallelCommand:
         assert "model:" not in str_repr_minimal
         assert "prompt:" not in str_repr_minimal
 
-    @patch('cai.repl.commands.parallel.get_available_agents')
+    @patch('cerberus.repl.commands.parallel.get_available_agents')
     def test_handle_add_valid_agent(self, mock_get_agents, parallel_command):
         """Test adding a valid agent to parallel config."""
         # Mock available agents
@@ -106,7 +106,7 @@ class TestParallelCommand:
         assert parallel_module.PARALLEL_CONFIGS[0].prompt is None
         assert parallel_module.PARALLEL_CONFIGS[0].id == "P1"  # Should be assigned P1
     
-    @patch('cai.repl.commands.parallel.get_available_agents')
+    @patch('cerberus.repl.commands.parallel.get_available_agents')
     def test_handle_add_with_model_and_prompt(self, mock_get_agents, parallel_command):
         """Test adding agent with model and prompt parameters."""
         mock_get_agents.return_value = {"test_agent": Mock()}
@@ -121,7 +121,7 @@ class TestParallelCommand:
         assert config.model == "gpt-4"
         assert config.prompt == "Custom prompt"
     
-    @patch('cai.repl.commands.parallel.get_available_agents')
+    @patch('cerberus.repl.commands.parallel.get_available_agents')
     def test_handle_add_invalid_agent(self, mock_get_agents, parallel_command):
         """Test adding an invalid agent name."""
         mock_get_agents.return_value = {"valid_agent": Mock()}
@@ -136,7 +136,7 @@ class TestParallelCommand:
         assert result is False
         assert len(parallel_module.PARALLEL_CONFIGS) == 0
     
-    @patch('cai.repl.commands.parallel.get_available_agents')
+    @patch('cerberus.repl.commands.parallel.get_available_agents')
     def test_handle_add_multiple_agents(self, mock_get_agents, parallel_command):
         """Test adding multiple agents."""
         mock_get_agents.return_value = {
@@ -250,7 +250,7 @@ class TestParallelCommand:
         assert "/par" in parallel_command.aliases
         assert "/p" in parallel_command.aliases
     
-    @patch('cai.repl.commands.parallel.get_available_agents')
+    @patch('cerberus.repl.commands.parallel.get_available_agents')
     def test_handle_main_command_routing(self, mock_get_agents, parallel_command):
         """Test that main handle method routes to correct subcommands."""
         mock_get_agents.return_value = {"test_agent": Mock()}
@@ -294,7 +294,7 @@ class TestParallelCommandIntegration:
         yield
         parallel_module.PARALLEL_CONFIGS.clear()
     
-    @patch('cai.repl.commands.parallel.get_available_agents')
+    @patch('cerberus.repl.commands.parallel.get_available_agents')
     def test_full_workflow(self, mock_get_agents):
         """Test a complete workflow of adding, listing, and removing configs."""
         mock_get_agents.return_value = {
@@ -327,7 +327,7 @@ class TestParallelCommandIntegration:
         cmd.handle(["clear"])
         assert len(parallel_module.PARALLEL_CONFIGS) == 0
     
-    @patch('cai.repl.commands.parallel.get_available_agents')
+    @patch('cerberus.repl.commands.parallel.get_available_agents')
     def test_edge_case_combinations(self, mock_get_agents):
         """Test edge cases and unusual parameter combinations."""
         mock_get_agents.return_value = {"test_agent": Mock()}
@@ -348,7 +348,7 @@ class TestParallelCommandIntegration:
         
         assert len(parallel_module.PARALLEL_CONFIGS) == 3
     
-    @patch('cai.repl.commands.parallel.get_available_agents')
+    @patch('cerberus.repl.commands.parallel.get_available_agents')
     def test_handle_remove_by_id(self, mock_get_agents):
         """Test removing agents by ID."""
         mock_get_agents.return_value = {
@@ -385,7 +385,7 @@ class TestParallelCommandIntegration:
         assert result2 is False
         assert len(parallel_module.PARALLEL_CONFIGS) == 2
     
-    @patch('cai.repl.commands.parallel.get_available_agents')
+    @patch('cerberus.repl.commands.parallel.get_available_agents')
     def test_parse_agent_names_with_ids(self, mock_get_agents):
         """Test parsing agent names that includes IDs."""
         mock_agent = Mock()
@@ -417,7 +417,7 @@ class TestParallelCommandIntegration:
         result2 = cmd._parse_agent_names(["P1", "Test Agent #2"], all_histories)
         assert len(result2) == 2
     
-    @patch('cai.repl.commands.parallel.get_available_agents')
+    @patch('cerberus.repl.commands.parallel.get_available_agents')
     def test_merge_with_remove_sources(self, mock_get_agents):
         """Test merging agents with --remove-sources flag."""
         # This is a simplified test that just checks the remove functionality
@@ -446,8 +446,8 @@ class TestParallelCommandIntegration:
         cmd.handle_clear([])
         assert len(parallel_module.PARALLEL_CONFIGS) == 0
     
-    @patch('cai.repl.commands.parallel.get_available_agents')
-    @patch('cai.repl.commands.parallel.get_all_agent_histories')
+    @patch('cerberus.repl.commands.parallel.get_available_agents')
+    @patch('cerberus.repl.commands.parallel.get_all_agent_histories')
     def test_merge_case_insensitive(self, mock_get_histories, mock_get_agents):
         """Test that agent name matching is case-insensitive in merge."""
         mock_agent = Mock()
@@ -477,7 +477,7 @@ class TestParallelCommandIntegration:
         assert "Test Agent" in result
         assert "Another Agent" in result
     
-    @patch('cai.repl.commands.parallel.get_available_agents')
+    @patch('cerberus.repl.commands.parallel.get_available_agents')
     def test_handle_prompt_command(self, mock_get_agents):
         """Test the prompt subcommand."""
         mock_get_agents.return_value = {

@@ -3,7 +3,7 @@
 Tool to record asciinema sessions of JSONL replay files.
 
 Usage:
-    cai-asciinema path/to/file.jsonl 0.5
+    cerberus-asciinema path/to/file.jsonl 0.5
 
 This tool wraps asciinema recording to capture replay sessions.
 """
@@ -20,8 +20,8 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  cai-asciinema path/to/file.jsonl 0.5
-  cai-asciinema conversation.jsonl 1.0
+  cerberus-asciinema path/to/file.jsonl 0.5
+  cerberus-asciinema conversation.jsonl 1.0
 """
     )
 

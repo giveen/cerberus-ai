@@ -1,12 +1,12 @@
 import json
 
-from cai.rag.summaries import (
+from cerberus.rag.summaries import (
     persist_summaries,
     read_persisted_summaries,
     load_summaries_for_session,
 )
-from cai.rag.wakeup_index import WakeupIndex
-from cai.rag.embeddings import LocalDeterministicEmbeddingsProvider
+from cerberus.rag.wakeup_index import WakeupIndex
+from cerberus.rag.embeddings import LocalDeterministicEmbeddingsProvider
 
 
 def test_persist_and_read_summaries(tmp_path):

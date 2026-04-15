@@ -3,14 +3,14 @@ import os
 import openai
 import pytest
 
-from cai.sdk.agents import set_default_openai_api, set_default_openai_client, set_default_openai_key
-from cai.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
-from cai.sdk.agents.models.openai_provider import OpenAIProvider
-from cai.sdk.agents.models.openai_responses import OpenAIResponsesModel
+from cerberus.sdk.agents import set_default_openai_api, set_default_openai_client, set_default_openai_key
+from cerberus.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+from cerberus.sdk.agents.models.openai_provider import OpenAIProvider
+from cerberus.sdk.agents.models.openai_responses import OpenAIResponsesModel
 
 
 import os
-cai_model = os.getenv('CEREBRO_MODEL', "qwen2.5:14b")
+cai_model = os.getenv('CERBERUS_MODEL', "qwen2.5:14b")
 
 def test_cc_no_default_key_errors(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

@@ -5,19 +5,19 @@ from typing import Any
 
 from openai.types.responses import Response, ResponseCompletedEvent
 
-from cai.sdk.agents.agent_output import AgentOutputSchema
-from cai.sdk.agents.handoffs import Handoff
-from cai.sdk.agents.items import (
+from cerberus.sdk.agents.agent_output import AgentOutputSchema
+from cerberus.sdk.agents.handoffs import Handoff
+from cerberus.sdk.agents.items import (
     ModelResponse,
     TResponseInputItem,
     TResponseOutputItem,
     TResponseStreamEvent,
 )
-from cai.sdk.agents.model_settings import ModelSettings
-from cai.sdk.agents.models.interface import Model, ModelTracing
-from cai.sdk.agents.tool import Tool
-from cai.sdk.agents.tracing import SpanError, generation_span
-from cai.sdk.agents.usage import Usage
+from cerberus.sdk.agents.model_settings import ModelSettings
+from cerberus.sdk.agents.models.interface import Model, ModelTracing
+from cerberus.sdk.agents.tool import Tool
+from cerberus.sdk.agents.tracing import SpanError, generation_span
+from cerberus.sdk.agents.usage import Usage
 
 
 class FakeModel(Model):

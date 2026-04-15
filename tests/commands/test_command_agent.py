@@ -13,8 +13,8 @@ import pytest
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
-from cai.repl.commands.agent import AgentCommand
-from cai.repl.commands.base import Command
+from cerberus.repl.commands.agent import AgentCommand
+from cerberus.repl.commands.base import Command
 
 
 class TestAgentCommand:
@@ -24,16 +24,16 @@ class TestAgentCommand:
     def setup_and_cleanup(self):
         """Setup and cleanup for each test."""
         # Set up test environment
-        os.environ["CEREBRO_TELEMETRY"] = "false"
-        os.environ["CEREBRO_TRACING"] = "false"
+        os.environ["CERBERUS_TELEMETRY"] = "false"
+        os.environ["CERBERUS_TRACING"] = "false"
 
         # Clear any agent-related environment variables
         env_vars_to_clear = [
-            "CEREBRO_AGENT_TYPE",
+            "CERBERUS_AGENT_TYPE",
             "CTF_MODEL",
-            "CEREBRO_CODE_MODEL",
-            "CEREBRO_TEST_MODEL",
-            "CEREBRO_CUSTOM_MODEL",
+            "CERBERUS_CODE_MODEL",
+            "CERBERUS_TEST_MODEL",
+            "CERBERUS_CUSTOM_MODEL",
         ]
         for var in env_vars_to_clear:
             if var in os.environ:
@@ -115,7 +115,7 @@ class TestAgentCommand:
 
     def test_get_model_display_with_env_var(self, agent_command):
         """Test model display with agent-specific environment variable."""
-        os.environ["CEREBRO_TEST_MODEL"] = "custom-model"
+        os.environ["CERBERUS_TEST_MODEL"] = "custom-model"
 
         mock_agent = Mock()
         mock_agent.model = "default-model"
@@ -141,8 +141,8 @@ class TestAgentCommand:
         result = agent_command._get_model_display_for_info("test", mock_agent)
         assert result == "Default CTF Model"
 
-    @patch("cai.repl.commands.agent.get_available_agents")
-    @patch("cai.repl.commands.agent.get_agent_module")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_agent_module")
     def test_handle_list(self, mock_get_module, mock_get_agents, agent_command, mock_agents):
         """Test listing available agents."""
         mock_get_agents.return_value = mock_agents
@@ -154,8 +154,8 @@ class TestAgentCommand:
         # Verify get_available_agents was called
         mock_get_agents.assert_called_once()
 
-    @patch("cai.repl.commands.agent.get_available_agents")
-    @patch("cai.repl.commands.agent.visualize_agent_graph")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.visualize_agent_graph")
     def test_handle_select_by_name(
         self, mock_visualize, mock_get_agents, agent_command, mock_agents
     ):
@@ -164,22 +164,22 @@ class TestAgentCommand:
 
         result = agent_command.handle_select(["blueteam_agent"])
         assert result is True
-        assert os.environ.get("CEREBRO_AGENT_TYPE") == "blueteam_agent"
+        assert os.environ.get("CERBERUS_AGENT_TYPE") == "blueteam_agent"
 
         # Verify visualization was called
         mock_visualize.assert_called_once_with(mock_agents["blueteam_agent"])
 
-    @patch("cai.repl.commands.agent.get_available_agents")
-    @patch("cai.repl.commands.agent.visualize_agent_graph")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.visualize_agent_graph")
     def test_handle_select_by_number(
         self, mock_visualize, mock_get_agents, agent_command, mock_agents
     ):
         """Test selecting an agent by number."""
         mock_get_agents.return_value = mock_agents
 
-        # Clear CEREBRO_AGENT_TYPE to ensure clean test
-        if "CEREBRO_AGENT_TYPE" in os.environ:
-            del os.environ["CEREBRO_AGENT_TYPE"]
+        # Clear CERBERUS_AGENT_TYPE to ensure clean test
+        if "CERBERUS_AGENT_TYPE" in os.environ:
+            del os.environ["CERBERUS_AGENT_TYPE"]
 
         result = agent_command.handle_select(["2"])
         
@@ -188,38 +188,38 @@ class TestAgentCommand:
         if result is False:
             # The command failed as expected due to locals() scope issue
             # This is the actual behavior of the code
-            assert "CEREBRO_AGENT_TYPE" not in os.environ
+            assert "CERBERUS_AGENT_TYPE" not in os.environ
         else:
             # If it succeeds, check that the correct agent was selected
             assert result is True
             agent_keys = list(mock_agents.keys())
             expected_key = agent_keys[1]  # Second agent (0-indexed)
-            assert os.environ.get("CEREBRO_AGENT_TYPE") == expected_key
+            assert os.environ.get("CERBERUS_AGENT_TYPE") == expected_key
 
-    @patch("cai.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
     def test_handle_select_invalid_name(self, mock_get_agents, agent_command, mock_agents):
         """Test selecting an invalid agent name."""
         mock_get_agents.return_value = mock_agents
 
         result = agent_command.handle_select(["invalid_agent"])
         assert result is False
-        assert "CEREBRO_AGENT_TYPE" not in os.environ
+        assert "CERBERUS_AGENT_TYPE" not in os.environ
 
-    @patch("cai.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
     def test_handle_select_invalid_number(self, mock_get_agents, agent_command, mock_agents):
         """Test selecting an invalid agent number."""
         mock_get_agents.return_value = mock_agents
 
         result = agent_command.handle_select(["99"])
         assert result is False
-        assert "CEREBRO_AGENT_TYPE" not in os.environ
+        assert "CERBERUS_AGENT_TYPE" not in os.environ
 
     def test_handle_select_no_args(self, agent_command):
         """Test select command with no arguments."""
         result = agent_command.handle_select([])
         assert result is False
 
-    @patch("cai.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
     def test_handle_info_by_name(self, mock_get_agents, agent_command, mock_agents):
         """Test getting info for an agent by name."""
         mock_get_agents.return_value = mock_agents
@@ -227,7 +227,7 @@ class TestAgentCommand:
         result = agent_command.handle_info(["blueteam_agent"])
         assert result is True
 
-    @patch("cai.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
     def test_handle_info_by_number(self, mock_get_agents, agent_command, mock_agents):
         """Test getting info for an agent by number."""
         mock_get_agents.return_value = mock_agents
@@ -235,7 +235,7 @@ class TestAgentCommand:
         result = agent_command.handle_info(["1"])
         assert result is True
 
-    @patch("cai.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
     def test_handle_info_invalid_name(self, mock_get_agents, agent_command, mock_agents):
         """Test getting info for an invalid agent name."""
         mock_get_agents.return_value = mock_agents
@@ -243,7 +243,7 @@ class TestAgentCommand:
         result = agent_command.handle_info(["invalid_agent"])
         assert result is False
 
-    @patch("cai.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
     def test_handle_info_invalid_number(self, mock_get_agents, agent_command, mock_agents):
         """Test getting info for an invalid agent number."""
         mock_get_agents.return_value = mock_agents
@@ -256,30 +256,30 @@ class TestAgentCommand:
         result = agent_command.handle_info([])
         assert result is False
 
-    @patch("cai.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
     def test_handle_current_single_agent(self, mock_get_agents, agent_command, mock_agents):
         """Test handle_current for single agent mode."""
         mock_get_agents.return_value = mock_agents
-        os.environ["CEREBRO_AGENT_TYPE"] = "blueteam_agent"
-        os.environ["CEREBRO_PARALLEL"] = "1"  # Ensure single agent mode
+        os.environ["CERBERUS_AGENT_TYPE"] = "blueteam_agent"
+        os.environ["CERBERUS_PARALLEL"] = "1"  # Ensure single agent mode
         
         result = agent_command.handle_current([])
         assert result is True
 
-    @patch("cai.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
     def test_handle_current_agent_not_found(self, mock_get_agents, agent_command, mock_agents):
         """Test handle_current when current agent is not found."""
         mock_get_agents.return_value = mock_agents
-        os.environ["CEREBRO_AGENT_TYPE"] = "nonexistent_agent"
-        os.environ["CEREBRO_PARALLEL"] = "1"
+        os.environ["CERBERUS_AGENT_TYPE"] = "nonexistent_agent"
+        os.environ["CERBERUS_PARALLEL"] = "1"
         
         result = agent_command.handle_current([])
         assert result is False
 
-    @patch("cai.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
     def test_handle_current_parallel_mode(self, mock_get_agents, agent_command):
         """Test handle_current for parallel mode."""
-        from cai.repl.commands.parallel import ParallelConfig, PARALLEL_CONFIGS
+        from cerberus.repl.commands.parallel import ParallelConfig, PARALLEL_CONFIGS
         
         # Save original configs
         original_configs = PARALLEL_CONFIGS[:]
@@ -319,7 +319,7 @@ class TestAgentCommand:
             mock_get_agents.return_value = mock_agents
             
             # Set parallel mode
-            os.environ["CEREBRO_PARALLEL"] = "2"
+            os.environ["CERBERUS_PARALLEL"] = "2"
             
             result = agent_command.handle_current([])
             assert result is True
@@ -327,10 +327,10 @@ class TestAgentCommand:
             # Restore original configs
             PARALLEL_CONFIGS.clear()
             PARALLEL_CONFIGS.extend(original_configs)
-            if "CEREBRO_PARALLEL" in os.environ:
-                del os.environ["CEREBRO_PARALLEL"]
+            if "CERBERUS_PARALLEL" in os.environ:
+                del os.environ["CERBERUS_PARALLEL"]
 
-    @patch("cai.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
     def test_handle_info_with_complex_agent(self, mock_get_agents, agent_command):
         """Test info command with agent that has complex attributes."""
         # Create a more complex mock agent
@@ -360,9 +360,9 @@ class TestAgentCommand:
         assert agent_command.name == "/agent"
         assert "/a" in agent_command.aliases
 
-    @patch("cai.repl.commands.agent.get_available_agents")
-    @patch("cai.repl.commands.agent.get_agent_module")
-    @patch("cai.repl.commands.agent.visualize_agent_graph")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_agent_module")
+    @patch("cerberus.repl.commands.agent.visualize_agent_graph")
     def test_handle_main_command_routing(
         self, mock_visualize, mock_get_module, mock_get_agents, agent_command, mock_agents
     ):
@@ -371,7 +371,7 @@ class TestAgentCommand:
         mock_get_module.return_value = "test_module"
 
         # Set a default agent that exists in mock_agents
-        os.environ["CEREBRO_AGENT_TYPE"] = "blueteam_agent"
+        os.environ["CERBERUS_AGENT_TYPE"] = "blueteam_agent"
 
         # Test routing to current (no args now defaults to current)
         result1 = agent_command.handle([])
@@ -388,9 +388,9 @@ class TestAgentCommand:
         # Test direct agent selection (not a subcommand)
         result4 = agent_command.handle(["blueteam_agent"])
         assert result4 is True
-        assert os.environ.get("CEREBRO_AGENT_TYPE") == "blueteam_agent"
+        assert os.environ.get("CERBERUS_AGENT_TYPE") == "blueteam_agent"
 
-    @patch("cai.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
     def test_agent_with_callable_instructions(self, mock_get_agents, agent_command):
         """Test agent with callable instructions."""
         mock_agent = Mock()
@@ -413,7 +413,7 @@ class TestAgentCommand:
         result = agent_command.handle_info(["callable"])
         assert result is True
 
-    @patch("cai.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
     def test_agent_with_multiline_description(self, mock_get_agents, agent_command):
         """Test agent with multiline description that should be cleaned."""
         mock_agent = Mock()
@@ -448,11 +448,11 @@ class TestAgentCommandIntegration:
         """Setup for integration tests."""
         # Clear environment variables
         env_vars_to_clear = [
-            "CEREBRO_AGENT_TYPE",
+            "CERBERUS_AGENT_TYPE",
             "CTF_MODEL",
-            "CEREBRO_CODE_MODEL",
-            "CEREBRO_TEST_MODEL",
-            "CEREBRO_CUSTOM_MODEL",
+            "CERBERUS_CODE_MODEL",
+            "CERBERUS_TEST_MODEL",
+            "CERBERUS_CUSTOM_MODEL",
         ]
         for var in env_vars_to_clear:
             if var in os.environ:
@@ -465,10 +465,10 @@ class TestAgentCommandIntegration:
             if var in os.environ:
                 del os.environ[var]
 
-    @patch("cai.repl.commands.agent.get_available_agents")
-    @patch("cai.repl.commands.agent.get_agent_module")
-    @patch("cai.repl.commands.agent.visualize_agent_graph")
-    @patch("cai.agents.get_agent_by_name")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_agent_module")
+    @patch("cerberus.repl.commands.agent.visualize_agent_graph")
+    @patch("cerberus.agents.get_agent_by_name")
     def test_full_workflow(self, mock_get_agent_by_name, mock_visualize, mock_get_module, mock_get_agents):
         """Test a complete workflow of listing, selecting, and getting info."""
         # Setup mock agents
@@ -514,7 +514,7 @@ class TestAgentCommandIntegration:
         # Select an agent by name
         result2 = cmd.handle(["select", "agent1"])
         assert result2 is True
-        assert os.environ.get("CEREBRO_AGENT_TYPE") == "agent1"
+        assert os.environ.get("CERBERUS_AGENT_TYPE") == "agent1"
 
         # Get info for an agent
         result3 = cmd.handle(["info", "agent2"])
@@ -533,9 +533,9 @@ class TestAgentCommandIntegration:
         # Direct selection (not using select subcommand)
         result5 = cmd.handle(["agent3"])
         assert result5 is True
-        assert os.environ.get("CEREBRO_AGENT_TYPE") == "agent3"
+        assert os.environ.get("CERBERUS_AGENT_TYPE") == "agent3"
 
-    @patch("cai.repl.commands.agent.get_available_agents")
+    @patch("cerberus.repl.commands.agent.get_available_agents")
     def test_environment_variable_handling(self, mock_get_agents):
         """Test how environment variables affect model display."""
         mock_agent = Mock()
@@ -551,7 +551,7 @@ class TestAgentCommandIntegration:
         assert result1 == "default-model"
 
         # Test with agent-specific environment variable
-        os.environ["CEREBRO_TEST_MODEL"] = "env-specific-model"
+        os.environ["CERBERUS_TEST_MODEL"] = "env-specific-model"
         result2 = cmd._get_model_display("test", mock_agent)
         assert result2 == "env-specific-model"
 

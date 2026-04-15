@@ -1,10 +1,10 @@
-"""Test cli_print_tool_output deduplication logic with CEREBRO_STREAM=false"""
+"""Test cli_print_tool_output deduplication logic with CERBERUS_STREAM=false"""
 
 import os
 import time
 import pytest
 from unittest.mock import patch
-from cai.util import cli_print_tool_output
+from cerberus.util import cli_print_tool_output
 
 
 @pytest.fixture(autouse=True)
@@ -23,8 +23,8 @@ def reset_cli_print_state():
 
 
 def test_deduplication_with_streaming_disabled(capsys):
-    """Test that duplicate suppression works correctly when CEREBRO_STREAM=false"""
-    os.environ["CEREBRO_STREAM"] = "false"
+    """Test that duplicate suppression works correctly when CERBERUS_STREAM=false"""
+    os.environ["CERBERUS_STREAM"] = "false"
     
     # First call should display
     cli_print_tool_output(
@@ -72,8 +72,8 @@ def test_deduplication_with_streaming_disabled(capsys):
 
 
 def test_deduplication_with_streaming_enabled(capsys):
-    """Test that duplicate suppression works correctly when CEREBRO_STREAM=true"""
-    os.environ["CEREBRO_STREAM"] = "true"
+    """Test that duplicate suppression works correctly when CERBERUS_STREAM=true"""
+    os.environ["CERBERUS_STREAM"] = "true"
     
     # First call should display
     cli_print_tool_output(
@@ -100,7 +100,7 @@ def test_deduplication_with_streaming_enabled(capsys):
 
 def test_different_commands_always_display(capsys):
     """Test that different commands are not considered duplicates"""
-    os.environ["CEREBRO_STREAM"] = "false"
+    os.environ["CERBERUS_STREAM"] = "false"
     
     # First command
     cli_print_tool_output(
@@ -127,7 +127,7 @@ def test_different_commands_always_display(capsys):
 
 def test_empty_output_always_suppressed(capsys):
     """Test that empty output is always suppressed"""
-    os.environ["CEREBRO_STREAM"] = "false"
+    os.environ["CERBERUS_STREAM"] = "false"
     
     cli_print_tool_output(
         tool_name="generic_linux_command",
@@ -142,7 +142,7 @@ def test_empty_output_always_suppressed(capsys):
 
 def test_parallel_mode_deduplication(capsys):
     """Test deduplication in parallel mode with agent context"""
-    os.environ["CEREBRO_STREAM"] = "false"
+    os.environ["CERBERUS_STREAM"] = "false"
     
     # Simulate parallel agent execution with agent context
     token_info_p1 = {

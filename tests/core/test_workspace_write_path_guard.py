@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from cai.tools.reconnaissance.filesystem import PathGuard
+from cerberus.tools.reconnaissance.filesystem import PathGuard
 
 
 def test_path_guard_write_rejects_outside_workspace(tmp_path: Path):

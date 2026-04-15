@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from cai.tools.reconnaissance import generic_linux_command as glc
+from cerberus.tools.reconnaissance import generic_linux_command as glc
 
 
 def test_session_id_empty_quotes_uses_async(monkeypatch):

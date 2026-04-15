@@ -162,12 +162,12 @@ For this repository, usually inspect these paths early before drafting:
 - INSTALL.md for setup guidance
 - pyproject.toml for packaging and dependency shape
 - mkdocs.yml for documentation structure hints
-- src/cai/ for the main package layout
+- src/cerberus/ for the main package layout
 - tests/README.md and selected tests for usage and validation signals
 - dockerized/ and ci/ for deployment and automation context
 - docs/ if it exists in the current worktree
 
-Be careful not to confuse runtime application material under src/cai/skills/ with VS Code customization skills under .github/skills/.
+Be careful not to confuse runtime application material under src/cerberus/skills/ with VS Code customization skills under .github/skills/.
 
 If docs/ is missing in the current workspace, omit it instead of linking to deleted paths.
 

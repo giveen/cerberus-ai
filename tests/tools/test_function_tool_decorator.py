@@ -4,8 +4,8 @@ from typing import Any, Optional
 
 import pytest
 
-from cai.sdk.agents import function_tool
-from cai.sdk.agents.run_context import RunContextWrapper
+from cerberus.sdk.agents import function_tool
+from cerberus.sdk.agents.run_context import RunContextWrapper
 
 
 class DummyContext:

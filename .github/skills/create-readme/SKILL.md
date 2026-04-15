@@ -157,10 +157,10 @@ For this repository, inspect these paths early:
 - WHATS-NEW.md for recent capability changes worth reflecting indirectly
 - pyproject.toml for packaging and dependencies
 - mkdocs.yml for documentation structure hints
-- src/cai/ for the actual product surface
+- src/cerberus/ for the actual product surface
 - tests/README.md and representative tests for usage patterns
 - dockerized/ for container and deployment flows
-- media/cai.png and media/cai-banner.svg for possible header visuals
+- media/cerberus.png and media/cai-banner.svg for possible header visuals
 
 The current CAI README is large and heavily promotional. A strong rewrite should preserve important facts while becoming easier to scan and quicker to trust.
 

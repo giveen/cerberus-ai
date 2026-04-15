@@ -2,7 +2,7 @@
 """
 Example:
 
-CEREBRO_MODEL="claude-sonnet-4-20250514" CEREBRO_STREAM=True python3 case_study_generator.py \
+CERBERUS_MODEL="claude-sonnet-4-20250514" CERBERUS_STREAM=True python3 case_study_generator.py \
     --jsonl_file logs/cai_b97af8fc-3d51-45d3-8393-6c3341d33807_20250602_201144_luijait_darwin_24.5.0_81_38_189_27.jsonl \
     --output_php_file alias_web/case_study_test.php
 
@@ -28,14 +28,14 @@ import re
 from typing import List, Dict, Any, Optional
 
 # Import CAI SDK components
-from cai.sdk.agents import Runner
-from cai.sdk.agents.models.openai_chatcompletions import message_history, add_to_message_history
-from cai.sdk.agents.run_to_jsonl import load_history_from_jsonl
-from cai.sdk.agents.stream_events import RunItemStreamEvent
-from cai.sdk.agents.items import ToolCallOutputItem
+from cerberus.sdk.agents import Runner
+from cerberus.sdk.agents.models.openai_chatcompletions import message_history, add_to_message_history
+from cerberus.sdk.agents.run_to_jsonl import load_history_from_jsonl
+from cerberus.sdk.agents.stream_events import RunItemStreamEvent
+from cerberus.sdk.agents.items import ToolCallOutputItem
 
 # Import UseCase agent
-from src.cai.agents.usecase import use_case_agent
+from src.cerberus.agents.usecase import use_case_agent
 
 # Rich console for better output
 from rich.console import Console
@@ -171,7 +171,7 @@ async def generate_case_study(jsonl_file: str, output_php_file: str) -> Optional
     console.print(f"\n[cyan]Generating case study with UseCase agent...[/cyan]")
     
     # Configure streaming mode based on environment variable
-    stream_mode = os.getenv('CEREBRO_STREAM', 'true').lower() != 'false'
+    stream_mode = os.getenv('CERBERUS_STREAM', 'true').lower() != 'false'
     
     try:
         if stream_mode:
@@ -346,7 +346,7 @@ Examples:
   python case_study_generator.py --jsonl_file logs/last --output_php_file output.php --model gpt-4o
   
   # Disable streaming
-  CEREBRO_STREAM=false python case_study_generator.py --jsonl_file logs/last --output_php_file output.php
+  CERBERUS_STREAM=false python case_study_generator.py --jsonl_file logs/last --output_php_file output.php
         """
     )
     parser.add_argument(
@@ -385,10 +385,10 @@ async def main():
     
     # Override model if specified
     if args.model:
-        os.environ["CEREBRO_MODEL"] = args.model
+        os.environ["CERBERUS_MODEL"] = args.model
         console.print(f"[yellow]Using model override: {args.model}[/yellow]")
     
-    current_model = os.getenv("CEREBRO_MODEL", "alias0")
+    current_model = os.getenv("CERBERUS_MODEL", "alias0")
     console.print(f"[yellow]Model: {current_model}[/yellow]")
     
     # Check if JSONL file exists

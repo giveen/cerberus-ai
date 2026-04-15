@@ -13,7 +13,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 
-from cai.sdk.agents.models.openai_chatcompletions import (
+from cerberus.sdk.agents.models.openai_chatcompletions import (
     get_agent_message_history,
     get_all_agent_histories,
     ACTIVE_MODEL_INSTANCES,
@@ -26,16 +26,16 @@ class TestCLIStreaming(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up test environment."""
-        os.environ["CEREBRO_TELEMETRY"] = "false"
-        os.environ["CEREBRO_TRACING"] = "false"
-        os.environ["CEREBRO_STREAM"] = "false"
+        os.environ["CERBERUS_TELEMETRY"] = "false"
+        os.environ["CERBERUS_TRACING"] = "false"
+        os.environ["CERBERUS_STREAM"] = "false"
 
     @classmethod
     def tearDownClass(cls):
         """Clean up after tests."""
         # Import here to avoid circular imports
-        from cai.sdk.agents.models.openai_chatcompletions import PERSISTENT_MESSAGE_HISTORIES
-        from cai.sdk.agents.simple_agent_manager import AGENT_MANAGER
+        from cerberus.sdk.agents.models.openai_chatcompletions import PERSISTENT_MESSAGE_HISTORIES
+        from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
         
         # Clear all active model instances
         ACTIVE_MODEL_INSTANCES.clear()
@@ -54,11 +54,11 @@ class TestCLIStreaming(unittest.TestCase):
         self._test_model = None
         
         # Clear any existing message histories
-        from cai.sdk.agents.models.openai_chatcompletions import (
+        from cerberus.sdk.agents.models.openai_chatcompletions import (
             OpenAIChatCompletionsModel,
             PERSISTENT_MESSAGE_HISTORIES
         )
-        from cai.sdk.agents.simple_agent_manager import AGENT_MANAGER
+        from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
         
         # Clear persistent message histories to ensure clean state
         PERSISTENT_MESSAGE_HISTORIES.clear()
@@ -76,8 +76,8 @@ class TestCLIStreaming(unittest.TestCase):
     def tearDown(self):
         """Clean up after each test."""
         # Import here to avoid circular imports
-        from cai.sdk.agents.models.openai_chatcompletions import PERSISTENT_MESSAGE_HISTORIES
-        from cai.sdk.agents.simple_agent_manager import AGENT_MANAGER
+        from cerberus.sdk.agents.models.openai_chatcompletions import PERSISTENT_MESSAGE_HISTORIES
+        from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
         
         # Clear all active model instances
         ACTIVE_MODEL_INSTANCES.clear()
@@ -100,8 +100,8 @@ class TestCLIStreaming(unittest.TestCase):
     def add_to_test_message_history(self, msg):
         """Add a message to the test agent's history."""
         # Create a mock model instance for testing
-        from cai.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
-        from cai.sdk.agents.simple_agent_manager import AGENT_MANAGER
+        from cerberus.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+        from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
         from openai import AsyncOpenAI
         import os
         
@@ -130,9 +130,9 @@ class TestCLIStreaming(unittest.TestCase):
         # No need to clean up _Converter state since it's now instance-based
 
         # Also ensure environment is clean
-        os.environ["CEREBRO_STREAM"] = "false"
-        os.environ["CEREBRO_TELEMETRY"] = "false"
-        os.environ["CEREBRO_TRACING"] = "false"
+        os.environ["CERBERUS_STREAM"] = "false"
+        os.environ["CERBERUS_TELEMETRY"] = "false"
+        os.environ["CERBERUS_TRACING"] = "false"
 
     def test_ctrl_c_cleanup_message_consistency(self):
         """Test CTRL+C cleanup logic maintains message consistency."""
@@ -231,7 +231,7 @@ class TestCLIStreaming(unittest.TestCase):
                     pending_calls.append(call_info.get("name", "unknown"))
 
             # Apply message list fixes like the real system does
-            from cai.util import fix_message_list
+            from cerberus.util import fix_message_list
 
             try:
                 fixed_messages = fix_message_list(
@@ -279,7 +279,7 @@ class TestCLIStreaming(unittest.TestCase):
 
     def test_fix_message_list_with_interrupted_tools(self):
         """Test fix_message_list handles interrupted tool sequences correctly."""
-        from cai.util import fix_message_list
+        from cerberus.util import fix_message_list
         
         # No need for _Converter cleanup since it's now instance-based
 
@@ -450,12 +450,12 @@ class TestCLIStreaming(unittest.TestCase):
     def test_streaming_mode_configuration(self):
         """Test streaming mode can be configured and detected."""
         # Test non-streaming mode
-        os.environ["CEREBRO_STREAM"] = "false"
-        assert os.environ["CEREBRO_STREAM"] == "false"
+        os.environ["CERBERUS_STREAM"] = "false"
+        assert os.environ["CERBERUS_STREAM"] == "false"
 
         # Test streaming mode
-        os.environ["CEREBRO_STREAM"] = "true"
-        assert os.environ["CEREBRO_STREAM"] == "true"
+        os.environ["CERBERUS_STREAM"] = "true"
+        assert os.environ["CERBERUS_STREAM"] == "true"
 
         print("✅ Streaming mode configuration test passed!")
 

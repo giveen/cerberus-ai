@@ -8,7 +8,7 @@ Usage:
 
     # Or using positional arguments:
     python3 tools/replay.py path/to/file.jsonl 0.5
-    cai-replay path/to/file.jsonl 0.5
+    cerberus-replay path/to/file.jsonl 0.5
 
     # Or using command line arguments:
     python3 tools/replay.py --jsonl-file-path path/to/file.jsonl --replay-delay 0.5
@@ -17,7 +17,7 @@ Usage with asciinema rec, generating a .cast file and then converting it to a gi
     asciinema rec --command="python3 tools/replay.py path/to/file.jsonl 0.5" --overwrite
 
 Or alternatively:
-    asciinema rec --command="JSONL_FILE_PATH='caiextensions-memory/caiextensions/memory/it/pentestperf/hackableii/hackableII_autonomo.jsonl' REPLAY_DELAY='0.05' cai-replay"
+    asciinema rec --command="JSONL_FILE_PATH='caiextensions-memory/caiextensions/memory/it/pentestperf/hackableii/hackableII_autonomo.jsonl' REPLAY_DELAY='0.05' cerberus-replay"
 
 Then convert the .cast file to a gif:
     agg /tmp/tmp6c4dxoac-ascii.cast demo.gif
@@ -35,9 +35,9 @@ import argparse
 from typing import Dict, List, Tuple
 
 # Disable session recording for replay tool
-os.environ["CEREBRO_DISABLE_SESSION_RECORDING"] = "true"
+os.environ["CERBERUS_DISABLE_SESSION_RECORDING"] = "true"
 
-# Add the parent directory to the path to import cai modules
+# Add the parent directory to the path to import cerberus modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
@@ -48,14 +48,14 @@ from rich.console import Group
 from rich.columns import Columns
 from rich.rule import Rule
 
-from cai.util import (
+from cerberus.util import (
     cli_print_agent_messages,
     cli_print_tool_output,
     color,
     COST_TRACKER
 )
-from cai.sdk.agents.run_to_jsonl import get_token_stats, load_history_from_jsonl
-from cai.repl.ui.banner import display_banner
+from cerberus.sdk.agents.run_to_jsonl import get_token_stats, load_history_from_jsonl
+from cerberus.repl.ui.banner import display_banner
 from collections import defaultdict
 
 # Initialize console object for rich printing
@@ -570,7 +570,7 @@ Examples:
 
   # Using positional arguments:
   python3 tools/replay.py path/to/file.jsonl 0.5
-  cai-replay path/to/file.jsonl 0.5
+  cerberus-replay path/to/file.jsonl 0.5
 
   # Using command line arguments:
   python3 tools/replay.py --jsonl-file-path path/to/file.jsonl --replay-delay 0.5

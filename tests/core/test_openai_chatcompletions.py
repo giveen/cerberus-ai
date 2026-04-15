@@ -22,7 +22,7 @@ from openai.types.responses import (
     ResponseOutputText,
 )
 
-from cai.sdk.agents import (
+from cerberus.sdk.agents import (
     ModelResponse,
     ModelSettings,
     ModelTracing,
@@ -30,9 +30,9 @@ from cai.sdk.agents import (
     OpenAIProvider,
     generation_span,
 )
-from cai.sdk.agents.models.fake_id import FAKE_RESPONSES_ID
+from cerberus.sdk.agents.models.fake_id import FAKE_RESPONSES_ID
 import os
-cai_model = os.getenv('CEREBRO_MODEL', "qwen2.5:14b")
+cai_model = os.getenv('CERBERUS_MODEL', "qwen2.5:14b")
 
 @pytest.mark.allow_call_model_methods
 @pytest.mark.asyncio
@@ -247,7 +247,7 @@ async def test_fetch_response_stream(monkeypatch) -> None:
     object along with the underlying async stream. The OpenAI client call
     should include `stream_options` to request usage-delimited chunks.
     """
-    os.environ['CEREBRO_STREAM'] = 'true'
+    os.environ['CERBERUS_STREAM'] = 'true'
     async def event_stream() -> AsyncIterator[ChatCompletionChunk]:
         if False:  # pragma: no cover
             yield  # pragma: no cover

@@ -1,1 +1,1 @@
-"""Tools package for cai framework.""" 
+"""Tools package for the Cerberus AI engine."""

@@ -3,9 +3,9 @@
 import asyncio
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
-from cai.repl.commands.parallel import ParallelCommand, PARALLEL_CONFIGS, ParallelConfig, PARALLEL_AGENT_INSTANCES
-from cai.sdk.agents.parallel_isolation import PARALLEL_ISOLATION
-from cai.sdk.agents import Agent, OpenAIChatCompletionsModel
+from cerberus.repl.commands.parallel import ParallelCommand, PARALLEL_CONFIGS, ParallelConfig, PARALLEL_AGENT_INSTANCES
+from cerberus.sdk.agents.parallel_isolation import PARALLEL_ISOLATION
+from cerberus.sdk.agents import Agent, OpenAIChatCompletionsModel
 from openai import AsyncOpenAI
 import os
 
@@ -27,8 +27,8 @@ class TestParallelInterruptHistory:
         PARALLEL_AGENT_INSTANCES.clear()
         PARALLEL_ISOLATION.clear_all_histories()
     
-    @patch('cai.cli.Runner')
-    @patch('cai.cli.get_agent_by_name')
+    @patch('cerberus.cli.Runner')
+    @patch('cerberus.cli.get_agent_by_name')
     def test_parallel_history_saved_on_interrupt(self, mock_get_agent, mock_runner):
         """Test that parallel agents' histories are saved when interrupted with Ctrl+C."""
         
@@ -151,8 +151,8 @@ class TestParallelInterruptHistory:
     
     def test_history_command_shows_saved_histories(self):
         """Test that /history command can access saved parallel agent histories."""
-        from cai.sdk.agents.simple_agent_manager import AGENT_MANAGER
-        from cai.repl.commands.history import HistoryCommand
+        from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+        from cerberus.repl.commands.history import HistoryCommand
         
         # Setup parallel mode with some history
         PARALLEL_ISOLATION._parallel_mode = True

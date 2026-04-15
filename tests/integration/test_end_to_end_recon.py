@@ -5,9 +5,9 @@ import datetime as _dt
 
 import pytest
 
-from cai.rag.vector_db_adapter import LocalFallbackAdapter
-from cai.rag.retriever_pipeline import DenseRetriever, SimpleBM25, RetrieverCombiner, RetrieverPipeline
-from cai.rag.embeddings import LocalDeterministicEmbeddingsProvider
+from cerberus.rag.vector_db_adapter import LocalFallbackAdapter
+from cerberus.rag.retriever_pipeline import DenseRetriever, SimpleBM25, RetrieverCombiner, RetrieverPipeline
+from cerberus.rag.embeddings import LocalDeterministicEmbeddingsProvider
 
 
 @pytest.mark.integration
@@ -20,8 +20,8 @@ def test_end_to_end_recon_hybrid_prioritizes_recent(tmp_path, monkeypatch):
     """
     # Use a temp dir for persisted local indexes to avoid touching home
     persist_dir = tmp_path / "local_persist"
-    monkeypatch.setenv("CEREBRO_LOCAL_PERSIST_DIR", str(persist_dir))
-    monkeypatch.setenv("CEREBRO_USE_FAISS", "1")
+    monkeypatch.setenv("CERBERUS_LOCAL_PERSIST_DIR", str(persist_dir))
+    monkeypatch.setenv("CERBERUS_USE_FAISS", "1")
 
     # Small deterministic embedding vectors for speed
     provider = LocalDeterministicEmbeddingsProvider({"vector_dim": 32, "cache_enabled": True})

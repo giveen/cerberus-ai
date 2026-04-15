@@ -3,12 +3,12 @@ name: Embeddings tests
 on:
   push:
     paths:
-      - 'src/cai/rag/**'
+      - 'src/cerberus/rag/**'
       - 'tests/**'
       - '.github/workflows/embeddings-tests.yml'
   pull_request:
     paths:
-      - 'src/cai/rag/**'
+      - 'src/cerberus/rag/**'
       - 'tests/**'
 
 jobs:

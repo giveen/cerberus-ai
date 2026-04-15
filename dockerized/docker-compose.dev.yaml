@@ -1,11 +1,21 @@
 services:
-  cai:
+  cerberus:
     # Enable live source development without rebuilding the image.
     # Usage:
-    #   docker compose -f dockerized/docker-compose.yaml -f dockerized/docker-compose.dev.yaml up -d
+    #   docker compose -f dockerized/docker-compose.yml --profile runtime -f dockerized/docker-compose.dev.yaml up --build
     # Then after code edits, restart only the service:
-    #   docker compose -f dockerized/docker-compose.yaml -f dockerized/docker-compose.dev.yaml restart cai
+    #   docker compose -f dockerized/docker-compose.yml --profile runtime -f dockerized/docker-compose.dev.yaml restart cerberus
     volumes:
-      - ..:/opt/cai-src:rw
+      - ../src/cerberus:/workspace/src/cerberus:rw
+      - ../tools:/workspace/tools:rw
     environment:
-      - PYTHONPATH=/opt/cai-src/src
+      PYTHONPATH: /workspace/src
+
+  cerberus-dashboard:
+    volumes:
+      - ../src/cerberus:/workspace/src/cerberus:rw
+      - ../tools:/workspace/tools:rw
+      - ../cerberus_dashboard:/workspace/cerberus_dashboard:rw
+      - ../rxconfig.py:/workspace/rxconfig.py:rw
+    environment:
+      PYTHONPATH: /workspace/src

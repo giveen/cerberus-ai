@@ -1,5 +1,5 @@
-TRACE_DEBUG: SynchronousMultiTracingProcessor added processor <cai.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x7482776be540>
-TRACE_DEBUG: TraceProvider.register_processor called with <cai.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x7482776be540>
+TRACE_DEBUG: SynchronousMultiTracingProcessor added processor <cerberus.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x7482776be540>
+TRACE_DEBUG: TraceProvider.register_processor called with <cerberus.sdk.agents.tracing.processors.BatchTraceProcessor object at 0x7482776be540>
 [04/13/26 14:00:32] Level 24 X ACTION main Hardware pre-flight complete         
 gpu                   NVIDIA GeForce RTX 5090
 gpu_vram_mb           32607.0                
@@ -73,12 +73,12 @@ transfer_engine  CerebroOpenTransfer
 targets           ["127.0.0.1"]  
 authorized_cidrs  ["127.0.0.0/8"]
                     Level 25 A AUDIT main CMCD loaded                           
-path    /home/jabbatheduck/Projects/cai/src/cai/prompts/core/system_master_temp…
+path    /home/jabbatheduck/Projects/cai/src/cerberus/prompts/core/system_master_temp…
 sha256  9054b06e2a08dd37d80d5259b64e2aed8ac1f36140140ed2982f5a5859cc554c        
                     Level 25 A AUDIT main Init-only pre-flight completed        
 workspace     /home/jabbatheduck/Projects/cai/workspace_cli_test                
 scope_source  /home/jabbatheduck/Projects/cai/workspace_cli_test/scope.json     
-cmcd_path     /home/jabbatheduck/Projects/cai/src/cai/prompts/core/system_maste…
+cmcd_path     /home/jabbatheduck/Projects/cai/src/cerberus/prompts/core/system_maste…
 2026-04-13 14:00:40,240 - [COST] - INFO - [CCMB] commit #2 completed
 2026-04-13 14:00:40,240 - [COST] - INFO - [CADE] Search engine closed
 2026-04-13 14:00:40,240 - [COST] - INFO - [CHPE] Background flusher stopped

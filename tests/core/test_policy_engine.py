@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cai.verification.policy_engine import (
+from cerberus.verification.policy_engine import (
     PolicyEngine,
     format_logic_audit_report,
     render_logic_audit_report_markdown,
@@ -88,7 +88,7 @@ def test_verify_blocks_missing_binary_dependency(monkeypatch, tmp_path):
             return None
         return f"/usr/bin/{name}"
 
-    monkeypatch.setattr("cai.verification.policy_engine.shutil.which", _which)
+    monkeypatch.setattr("cerberus.verification.policy_engine.shutil.which", _which)
 
     report = engine.verify(
         {
@@ -100,6 +100,39 @@ def test_verify_blocks_missing_binary_dependency(monkeypatch, tmp_path):
 
     assert report.blocked is True
     assert any(f.code == "missing_dependency" for f in report.findings)
+
+
+def test_post_audit_ignores_malformed_raw_args_for_generic_tool(tmp_path):
+    engine = PolicyEngine(workspace_dir=str(tmp_path), project_id="eng-1")
+
+    report = engine.run_post_audit(
+        planned_calls=[
+            {
+                "tool_name": "foo",
+                "arguments": "bad_json",
+            }
+        ],
+        available_tools=["foo"],
+        previous_signature=None,
+    )
+
+    assert report.blocked is False
+    assert not any(f.code == "missing_dependency" for f in report.findings)
+
+
+def test_verify_allows_supervised_prompt_dispatch(tmp_path):
+    engine = PolicyEngine(workspace_dir=str(tmp_path), project_id="eng-1")
+
+    report = engine.verify(
+        {
+            "tool_name": "run_supervised_prompt",
+            "arguments": {"prompt": "Hello"},
+        }
+    )
+
+    assert report.blocked is False
+    assert not any(f.code == "tool_unavailable" for f in report.findings)
+    assert not any(f.code == "missing_dependency" for f in report.findings)
 
 
 def test_logic_audit_report_formatter_from_committing_json():

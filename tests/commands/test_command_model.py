@@ -14,8 +14,8 @@ from unittest.mock import patch, Mock, MagicMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 
                                 '..', '..', 'src'))
 
-from cai.repl.commands.model import ModelCommand, ModelShowCommand
-from cai.repl.commands.base import Command
+from cerberus.repl.commands.model import ModelCommand, ModelShowCommand
+from cerberus.repl.commands.base import Command
 
 
 class TestModelCommand:
@@ -25,19 +25,19 @@ class TestModelCommand:
     def setup_and_cleanup(self):
         """Setup and cleanup for each test."""
         # Set up test environment
-        os.environ['CEREBRO_TELEMETRY'] = 'false'
-        os.environ['CEREBRO_TRACING'] = 'false'
+        os.environ['CERBERUS_TELEMETRY'] = 'false'
+        os.environ['CERBERUS_TRACING'] = 'false'
         
-        # Store original CEREBRO_MODEL if it exists
-        self.original_model = os.environ.get('CEREBRO_MODEL')
+        # Store original CERBERUS_MODEL if it exists
+        self.original_model = os.environ.get('CERBERUS_MODEL')
         
         yield
         
-        # Restore original CEREBRO_MODEL or remove if it didn't exist
+        # Restore original CERBERUS_MODEL or remove if it didn't exist
         if self.original_model is not None:
-            os.environ['CEREBRO_MODEL'] = self.original_model
-        elif 'CEREBRO_MODEL' in os.environ:
-            del os.environ['CEREBRO_MODEL']
+            os.environ['CERBERUS_MODEL'] = self.original_model
+        elif 'CERBERUS_MODEL' in os.environ:
+            del os.environ['CERBERUS_MODEL']
     
     @pytest.fixture
     def model_command(self):
@@ -138,7 +138,7 @@ class TestModelCommand:
         mock_get.side_effect = side_effect
         
         # Set a model first
-        os.environ['CEREBRO_MODEL'] = 'gpt-4'
+        os.environ['CERBERUS_MODEL'] = 'gpt-4'
         
         result = model_command.handle([])
         assert result is True
@@ -155,7 +155,7 @@ class TestModelCommand:
         
         result = model_command.handle(["gpt-4"])
         assert result is True
-        assert os.environ.get('CEREBRO_MODEL') == 'gpt-4'
+        assert os.environ.get('CERBERUS_MODEL') == 'gpt-4'
     
     @patch('requests.get')
     def test_handle_select_model_by_number(self, mock_get, model_command, 
@@ -173,13 +173,13 @@ class TestModelCommand:
         # Then select by number
         result = model_command.handle(["1"])
         assert result is True
-        assert 'CEREBRO_MODEL' in os.environ
+        assert 'CERBERUS_MODEL' in os.environ
     
     def test_handle_select_custom_model(self, model_command):
         """Test selecting a custom model name not in the predefined list."""
         result = model_command.handle(["custom-model-name"])
         assert result is True
-        assert os.environ.get('CEREBRO_MODEL') == 'custom-model-name'
+        assert os.environ.get('CERBERUS_MODEL') == 'custom-model-name'
     
     @patch('requests.get')
     def test_handle_with_network_error(self, mock_get, model_command):
@@ -215,8 +215,8 @@ class TestModelShowCommand:
     def setup_and_cleanup(self):
         """Setup and cleanup for each test."""
         # Set up test environment
-        os.environ['CEREBRO_TELEMETRY'] = 'false'
-        os.environ['CEREBRO_TRACING'] = 'false'
+        os.environ['CERBERUS_TELEMETRY'] = 'false'
+        os.environ['CERBERUS_TRACING'] = 'false'
         
         yield
     
@@ -387,16 +387,16 @@ class TestModelCommandIntegration:
     @pytest.fixture(autouse=True)
     def setup_integration(self):
         """Setup for integration tests."""
-        # Store original CEREBRO_MODEL if it exists
-        self.original_model = os.environ.get('CEREBRO_MODEL')
+        # Store original CERBERUS_MODEL if it exists
+        self.original_model = os.environ.get('CERBERUS_MODEL')
         
         yield
         
-        # Restore original CEREBRO_MODEL or remove if it didn't exist
+        # Restore original CERBERUS_MODEL or remove if it didn't exist
         if self.original_model is not None:
-            os.environ['CEREBRO_MODEL'] = self.original_model
-        elif 'CEREBRO_MODEL' in os.environ:
-            del os.environ['CEREBRO_MODEL']
+            os.environ['CERBERUS_MODEL'] = self.original_model
+        elif 'CERBERUS_MODEL' in os.environ:
+            del os.environ['CERBERUS_MODEL']
     
     @patch('requests.get')
     def test_full_model_workflow(self, mock_get):
@@ -454,7 +454,7 @@ class TestModelCommandIntegration:
         # Select a model by name
         result3 = model_cmd.handle(["gpt-4"])
         assert result3 is True
-        assert os.environ.get('CEREBRO_MODEL') == 'gpt-4'
+        assert os.environ.get('CERBERUS_MODEL') == 'gpt-4'
         
         # Show current model again
         result4 = model_cmd.handle([])
@@ -478,17 +478,17 @@ class TestModelCommandIntegration:
         # Test selecting non-existent number (large number)
         result1 = cmd.handle(["999"])
         assert result1 is True
-        assert os.environ.get('CEREBRO_MODEL') == '999'  # Should use as literal
+        assert os.environ.get('CERBERUS_MODEL') == '999'  # Should use as literal
         
         # Test selecting model with special characters
         result2 = cmd.handle(["custom/model:latest"])
         assert result2 is True
-        assert os.environ.get('CEREBRO_MODEL') == 'custom/model:latest'
+        assert os.environ.get('CERBERUS_MODEL') == 'custom/model:latest'
         
         # Test empty model name (edge case)
         result3 = cmd.handle([""])
         assert result3 is True
-        assert os.environ.get('CEREBRO_MODEL') == ''
+        assert os.environ.get('CERBERUS_MODEL') == ''
     
     @patch('requests.get')
     def test_model_show_filters_combination(self, mock_get):

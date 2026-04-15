@@ -6,8 +6,8 @@ import re
 
 from rich.console import Console
 
-from cai import cli
-from cai.repl.ui.banner import BannerMetadata, CerebroBanner
+from cerberus import cli
+from cerberus.repl.ui.banner import BannerMetadata, CerberusBanner
 
 
 FORBIDDEN_PATTERNS = (
@@ -38,7 +38,7 @@ def test_cli_help_has_no_legacy_branding(monkeypatch) -> None:
 
 def test_banner_has_no_legacy_branding(monkeypatch) -> None:
     console = Console(record=True, width=140)
-    banner = CerebroBanner(console)
+    banner = CerberusBanner(console)
 
     fake_meta = BannerMetadata(
         version="0.0.0",
@@ -50,8 +50,8 @@ def test_banner_has_no_legacy_branding(monkeypatch) -> None:
         startup_ms=10,
     )
 
-    monkeypatch.setattr(CerebroBanner, "_collect_metadata", lambda self, start: fake_meta)
-    monkeypatch.setattr(CerebroBanner, "_pick_tip", lambda self, meta: "Use /workspace dashboard to inspect artifacts.")
+    monkeypatch.setattr(CerberusBanner, "_collect_metadata", lambda self, start: fake_meta)
+    monkeypatch.setattr(CerberusBanner, "_pick_tip", lambda self, meta: "Use /workspace dashboard to inspect artifacts.")
 
     banner.display()
     rendered = console.export_text()

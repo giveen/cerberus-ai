@@ -1,8 +1,8 @@
 from typing import List, Dict, Any, Tuple
 
-from cai.rag.vector_db_adapter import LocalFallbackAdapter
-from cai.rag.embeddings import LocalDeterministicEmbeddingsProvider
-from cai.rag.retriever_pipeline import (
+from cerberus.rag.vector_db_adapter import LocalFallbackAdapter
+from cerberus.rag.embeddings import LocalDeterministicEmbeddingsProvider
+from cerberus.rag.retriever_pipeline import (
     DenseRetriever,
     SimpleBM25,
     RetrieverCombiner,

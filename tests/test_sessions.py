@@ -1,7 +1,7 @@
 import time
 import pytest
 
-import cai.tools.sessions as sessions
+import cerberus.tools.sessions as sessions
 
 
 @pytest.fixture(autouse=True)

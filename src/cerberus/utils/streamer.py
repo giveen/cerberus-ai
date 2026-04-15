@@ -1,0 +1,41 @@
+"""Compatibility shim for subprocess streaming and termination helpers."""
+
+from cerberus.utils.process_handler import (
+    ChunkCallback,
+    ProcessCallback,
+    RegisteredProcess,
+    StreamCallback,
+    StreamedSubprocessResult,
+    StreamingContext,
+    capture_streaming_context,
+    emit_stream_event,
+    get_active_processes,
+    get_session_process_count,
+    has_active_processes,
+    register_process,
+    run_streaming_subprocess,
+    streaming_runtime,
+    terminate_registered_processes,
+    terminate_session_task,
+    unregister_process,
+)
+
+__all__ = [
+    "ChunkCallback",
+    "ProcessCallback",
+    "RegisteredProcess",
+    "StreamCallback",
+    "StreamedSubprocessResult",
+    "StreamingContext",
+    "capture_streaming_context",
+    "emit_stream_event",
+    "get_active_processes",
+    "get_session_process_count",
+    "has_active_processes",
+    "register_process",
+    "run_streaming_subprocess",
+    "streaming_runtime",
+    "terminate_registered_processes",
+    "terminate_session_task",
+    "unregister_process",
+]

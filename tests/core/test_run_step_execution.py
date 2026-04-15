@@ -6,8 +6,8 @@ from typing import Any, cast
 import pytest
 from pydantic import BaseModel
 
-from cai.parsers import parse_json_lenient, parse_response
-from cai.sdk.agents import (
+from cerberus.parsers import parse_json_lenient, parse_response
+from cerberus.sdk.agents import (
     Agent,
     MessageOutputItem,
     ModelResponse,
@@ -21,14 +21,14 @@ from cai.sdk.agents import (
     TResponseInputItem,
     Usage,
 )
-from cai.sdk.agents._run_impl import (
+from cerberus.sdk.agents._run_impl import (
     NextStepFinalOutput,
     NextStepHandoff,
     NextStepRunAgain,
     RunImpl,
     SingleStepResult,
 )
-from cai.sdk.agents.tool import function_tool
+from cerberus.sdk.agents.tool import function_tool
 
 from tests.core.test_responses import (
     get_final_output_message,
