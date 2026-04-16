@@ -241,7 +241,8 @@ async def test_not_starting_streaming_creates_trace():
                 "workflow_name": "Agent workflow",
                 "children": [
                     {
-                        "type": "agent", "data": {
+                        "type": "agent",
+                        "data": {
                             "name": "test_agent",
                             "handoffs": [],
                             "tools": [],

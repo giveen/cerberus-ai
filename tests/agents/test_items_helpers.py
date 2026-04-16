@@ -225,7 +225,12 @@ def test_to_input_items_for_file_search_call() -> None:
 
 def test_to_input_items_for_web_search_call() -> None:
     """A web search tool call output should produce the same dict as a web search input."""
-    ws_call = ResponseFunctionWebSearch(id="w1", status="completed", type="web_search_call")
+    ws_call = ResponseFunctionWebSearch(
+        id="w1",
+        status="completed",
+        type="web_search_call",
+        action={"type": "search", "query": "test query"},
+    )
     resp = ModelResponse(output=[ws_call], usage=Usage(), referenceable_id=None)
     input_items = resp.to_input_items()
     assert isinstance(input_items, list) and len(input_items) == 1
@@ -233,6 +238,7 @@ def test_to_input_items_for_web_search_call() -> None:
         "id": "w1",
         "status": "completed",
         "type": "web_search_call",
+        "action": {"type": "search", "query": "test query"},
     }
     assert input_items[0] == expected
 

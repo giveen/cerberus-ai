@@ -13,9 +13,11 @@ import os
 cai_model = os.getenv('CERBERUS_MODEL', "qwen2.5:14b")
 
 def test_cc_no_default_key_errors(monkeypatch):
+    # Cerberus now provides a fallback API key via get_effective_api_key(), so
+    # removing OPENAI_API_KEY no longer raises at model-construction time.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(openai.OpenAIError):
-        OpenAIProvider(use_responses=False).get_model(cai_model)
+    model = OpenAIProvider(use_responses=False).get_model(cai_model)
+    assert isinstance(model, OpenAIChatCompletionsModel)
 
 
 def test_cc_set_default_openai_key():
@@ -32,10 +34,12 @@ def test_cc_set_default_openai_client():
 
 
 def test_resp_no_default_key_errors(monkeypatch):
+    # Cerberus now provides a fallback API key via get_effective_api_key(), so
+    # removing OPENAI_API_KEY no longer raises at model-construction time.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     assert os.getenv("OPENAI_API_KEY") is None
-    with pytest.raises(openai.OpenAIError):
-        OpenAIProvider(use_responses=True).get_model(cai_model)
+    model = OpenAIProvider(use_responses=True).get_model(cai_model)
+    assert isinstance(model, OpenAIResponsesModel)
 
 
 def test_resp_set_default_openai_key():

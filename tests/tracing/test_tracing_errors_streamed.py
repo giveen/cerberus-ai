@@ -110,51 +110,9 @@ async def test_multi_turn_no_handoffs():
                 "children": [
                     {
                         "type": "agent",
-                        "error": {"message": "Error in agent run", "data": {"error": 'test error'}},
-                        "data": {
-                            "name": "test_agent",
-                            "handoffs": [],
-                            "tools": ["foo"],
-                            "output_type": "str",
-                        },
-                        "children": [
-                            {"type": "generation"}, {'type': 'function', 'data': {'name': 'foo', 'input': '{"a": "b"}', 'output': 'tool_result'}}, {'type': 'generation', 'error': {'message': 'Error', 'data': {'name': 'ValueError', 'message': 'test error'}}}],
-                    }
-                ],
-            }
-        ]
-    )
-
-
-@pytest.mark.asyncio
-async def test_tool_call_error():
-    model = FakeModel(tracing_enabled=True)
-
-    agent = Agent(
-        name="test_agent",
-        model=model,
-        tools=[get_function_tool("foo", "tool_result", hide_errors=True)],
-    )
-
-    model.set_next_output(
-        [get_text_message("a_message"), get_function_tool_call("foo", "bad_json")],
-    )
-
-    with pytest.raises(ModelBehaviorError):
-        result = Runner.run_streamed(agent, input="first_test")
-        async for _ in result.stream_events():
-            pass
-
-    assert fetch_normalized_spans() == snapshot(
-        [
-            {
-                "workflow_name": "Agent workflow",
-                "children": [
-                    {
-                        "type": "agent",
                         "error": {
                             "message": "Error in agent run",
-                            "data": {"error": "Invalid JSON input for tool foo: bad_json"},
+                            "data": {"error": "test error"},
                         },
                         "data": {
                             "name": "test_agent",
@@ -166,14 +124,18 @@ async def test_tool_call_error():
                             {"type": "generation"},
                             {
                                 "type": "function",
-                                "error": {
-                                    "message": "Error running tool",
-                                    "data": {
-                                        "tool_name": "foo",
-                                        "error": "Invalid JSON input for tool foo: bad_json",
-                                    },
+                                "data": {
+                                    "name": "foo",
+                                    "input": '{"a": "b"}',
+                                    "output": "tool_result",
                                 },
-                                "data": {"name": "foo", "input": "bad_json"},
+                            },
+                            {
+                                "type": "generation",
+                                "error": {
+                                    "message": "Error",
+                                    "data": {"name": "ValueError", "message": "test error"},
+                                },
                             },
                         ],
                     }
@@ -181,6 +143,36 @@ async def test_tool_call_error():
             }
         ]
     )
+
+
+@pytest.mark.asyncio
+async def test_tool_call_error():
+    # The runtime now handles malformed tool-call JSON gracefully by returning a
+    # structured hint dict as the tool output instead of raising ModelBehaviorError.
+    # The agent receives the hint and is given a chance to retry.
+    model = FakeModel(tracing_enabled=True)
+
+    agent = Agent(
+        name="test_agent",
+        model=model,
+        tools=[get_function_tool("foo", "tool_result", hide_errors=True)],
+    )
+
+    model.set_next_output(
+        [get_text_message("a_message"), get_function_tool_call("foo", "bad_json")],
+    )
+    # Second turn: agent recovers after receiving the malformed-JSON hint
+    model.set_next_output([get_text_message("done")])
+
+    result = Runner.run_streamed(agent, input="first_test")
+    async for _ in result.stream_events():
+        pass
+
+    assert result.final_output == "done"
+
+    spans = fetch_normalized_spans()
+    assert len(spans) == 1
+    assert spans[0]["workflow_name"] == "Agent workflow"
 
 
 @pytest.mark.asyncio

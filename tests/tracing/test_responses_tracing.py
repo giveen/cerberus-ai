@@ -31,6 +31,7 @@ class DummyResponse:
     def __aiter__(self):
         yield ResponseCompletedEvent(
             type="response.completed",
+            sequence_number=0,
             response=fake_model.get_response_obj(self.output),
         )
 
@@ -133,6 +134,7 @@ async def test_stream_response_creates_trace(monkeypatch):
                 async def __aiter__(self):
                     yield ResponseCompletedEvent(
                         type="response.completed",
+                        sequence_number=0,
                         response=fake_model.get_response_obj([], "dummy-id-123"),
                     )
 
@@ -171,6 +173,7 @@ async def test_stream_non_data_tracing_doesnt_set_response_id(monkeypatch):
                 async def __aiter__(self):
                     yield ResponseCompletedEvent(
                         type="response.completed",
+                        sequence_number=0,
                         response=fake_model.get_response_obj([], "dummy-id-123"),
                     )
 
@@ -208,6 +211,7 @@ async def test_stream_disabled_tracing_doesnt_create_span(monkeypatch):
                 async def __aiter__(self):
                     yield ResponseCompletedEvent(
                         type="response.completed",
+                        sequence_number=0,
                         response=fake_model.get_response_obj([], "dummy-id-123"),
                     )
 

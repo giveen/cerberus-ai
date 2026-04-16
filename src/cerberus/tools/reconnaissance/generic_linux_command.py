@@ -534,7 +534,43 @@ def _format_command_response(command: str, payload: Dict[str, Any]) -> str:
     return ""
 
 
-@function_tool(strict_mode=False)
+_NMAP_ARGV0_RE = re.compile(r'^\s*((?:\S+/)?nmap)\s', re.IGNORECASE)
+_NMAP_IP_TARGET_RE = re.compile(
+    r'(?:^|\s)'
+    r'(\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?'
+    r'|\[[\da-fA-F:]+\]'
+    r'|\S+/\d+)',
+)
+
+
+def _inject_nmap_no_dns(command: str) -> str:
+    """Ensure nmap commands scanning IP addresses include -n (no DNS resolution).
+
+    When absent, nmap performs reverse-DNS lookups and replaces the IP in the
+    scan report header with the resolved hostname, making assertions on IP
+    address presence non-deterministic.
+    """
+    if not _NMAP_ARGV0_RE.match(command):
+        return command
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return command
+    if "-n" in tokens or "--dns-servers" in tokens:
+        return command
+    # Only inject when the command uses raw IP targets (not hostnames)
+    has_ip_target = any(
+        _NMAP_IP_TARGET_RE.search(tok) for tok in tokens[1:]
+        if not tok.startswith("-")
+    )
+    if not has_ip_target:
+        return command
+    # Insert -n immediately after the nmap binary
+    tokens.insert(1, "-n")
+    return shlex.join(tokens)
+
+
+@function_tool(strict_mode=False, risk_tier=4)
 async def generic_linux_command(command: str = "", interactive: bool = False, session_id: Optional[str] = None, timeout_seconds: Optional[int] = None) -> str:
     normalized_session_id = _sanitize_session_id(session_id) if session_id is not None else None
     cmd_lower = command.strip().lower()
@@ -604,6 +640,8 @@ async def generic_linux_command(command: str = "", interactive: bool = False, se
     guardrail_error = validate_command_guardrails(command)
     if guardrail_error:
         return guardrail_error
+
+    command = _inject_nmap_no_dns(command)
 
     timeout_value = _DEFAULT_TIMEOUT_SECONDS if timeout_seconds is None else int(timeout_seconds)
     if normalized_session_id and timeout_seconds is None:

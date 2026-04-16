@@ -75,7 +75,23 @@ _PROMPT_DISPATCH_AGENT_ENV = "CERBERUS_DASHBOARD_PROMPT_AGENT"
 _PROMPT_DISPATCH_AGENT_LEGACY_ENV = "CEREBRO_DASHBOARD_PROMPT_AGENT"
 _PROMPT_DISPATCH_GLOBAL_AGENT_ENV = "CERBERUS_AGENT_TYPE"
 _PROMPT_DISPATCH_GLOBAL_AGENT_LEGACY_ENV = "CEREBRO_AGENT_TYPE"
+_PROMPT_DISPATCH_PYTHON_ENV = "CERBERUS_HEADLESS_PYTHON"
+_PROMPT_DISPATCH_PYTHON_LEGACY_ENV = "CEREBRO_HEADLESS_PYTHON"
+_PROMPT_DISPATCH_SOURCE_ROOT_ENV = "CERBERUS_SOURCE_ROOT"
+_PROMPT_DISPATCH_MAX_RETRIES = 3
+_RETRYABLE_PROMPT_ERROR_PATTERNS = [
+    "failed to parse tool call arguments as json",
+    "tool_arguments_missing_required_fields",
+]
+
+
+def _is_retryable_prompt_failure(message: str) -> bool:
+    """Return True when a prompt dispatch failure is transient and worth retrying."""
+    lower = message.lower()
+    return any(pat in lower for pat in _RETRYABLE_PROMPT_ERROR_PATTERNS)
+_PROMPT_DISPATCH_SOURCE_ROOT_LEGACY_ENV = "CEREBRO_SOURCE_ROOT"
 _PROMPT_DISPATCH_AGENT_FALLBACK = "assistant"
+_PROMPT_DISPATCH_CONTAINER_PYTHON = "/opt/cerberus-venv/bin/python"
 
 
 def _emit_headless_message(message: str, *, error: bool = False) -> None:
@@ -255,6 +271,48 @@ def _resolve_prompt_dispatch_agent() -> str:
     return _PROMPT_DISPATCH_AGENT_FALLBACK
 
 
+def _resolve_prompt_dispatch_python(env: Mapping[str, str], *, active_container: str) -> str:
+    for env_key in (_PROMPT_DISPATCH_PYTHON_ENV, _PROMPT_DISPATCH_PYTHON_LEGACY_ENV):
+        value = str(env.get(env_key, "") or "").strip()
+        if value:
+            return value
+    if active_container:
+        return _PROMPT_DISPATCH_CONTAINER_PYTHON
+    return sys.executable
+
+
+def _augment_prompt_dispatch_pythonpath(
+    env: dict[str, str],
+    *,
+    active_container: str,
+) -> None:
+    entries: list[str] = []
+    existing = str(env.get("PYTHONPATH", "") or "").strip()
+    if existing:
+        entries.extend([item for item in existing.split(os.pathsep) if item])
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for env_key in (_PROMPT_DISPATCH_SOURCE_ROOT_ENV, _PROMPT_DISPATCH_SOURCE_ROOT_LEGACY_ENV):
+        root_value = str(env.get(env_key, "") or "").strip()
+        if not root_value:
+            continue
+        root = Path(root_value).expanduser()
+        src_root_path = root / "src"
+        src_root = str(src_root_path.resolve()) if src_root_path.exists() else str(src_root_path)
+        if src_root and (active_container or src_root_path.exists()) and src_root not in seen:
+            ordered.append(src_root)
+            seen.add(src_root)
+
+    for entry in entries:
+        if entry not in seen:
+            ordered.append(entry)
+            seen.add(entry)
+
+    if ordered:
+        env["PYTHONPATH"] = os.pathsep.join(ordered)
+
+
 async def _invoke_streamable_tool(
     tool_name: str,
     arguments: dict[str, Any],
@@ -304,48 +362,62 @@ async def _invoke_streamable_tool(
         if active_container:
             env["CERBERUS_ACTIVE_CONTAINER"] = active_container
 
-        runner_python = "python3" if active_container else sys.executable
+        _augment_prompt_dispatch_pythonpath(env, active_container=active_container)
+        runner_python = _resolve_prompt_dispatch_python(env, active_container=active_container)
         try:
             timeout_seconds = max(30, int(os.getenv("CERBERUS_COMMAND_TIMEOUT_MAX", "3600")))
         except Exception:
             timeout_seconds = 3600
 
-        result = await run_streaming_subprocess(
-            argv=[
-                runner_python,
-                "-m",
-                "cerberus.cli",
-                "--workspace",
-                str(project_root),
-                "run",
-                prompt,
-            ],
-            cwd=str(project_root),
-            env=env,
-            timeout_seconds=timeout_seconds,
-            event_callback=lambda channel, message: _emit_headless_log(log_emitter, channel=channel, message=message),
-            session_id=session_id,
-        )
+        _run_argv = [
+            runner_python,
+            "-m",
+            "cerberus.cli",
+            "--workspace",
+            str(project_root),
+            "run",
+            prompt,
+        ]
 
-        combined_stdout = result.stdout.strip()
-        combined_stderr = result.stderr.strip()
-        exit_code = result.exit_code
+        last_failure: dict[str, Any] | None = None
+        for _attempt in range(_PROMPT_DISPATCH_MAX_RETRIES):
+            if _attempt > 0:
+                await _emit_headless_log(
+                    log_emitter,
+                    channel="status",
+                    message=f"Retrying run_supervised_prompt (attempt {_attempt + 1}/{_PROMPT_DISPATCH_MAX_RETRIES}) after retryable parse error.",
+                )
 
-        if result.timed_out:
-            failure_message = combined_stderr or combined_stdout or "Supervised prompt runner timed out by policy."
-            return {
-                "ok": False,
-                "error": {"code": "prompt_dispatch_timeout", "message": failure_message},
-                "output": {
-                    "stdout": combined_stdout,
-                    "stderr": combined_stderr,
-                    "exit_code": exit_code,
-                },
-            }, True
+            result = await run_streaming_subprocess(
+                argv=_run_argv,
+                cwd=str(project_root),
+                env=env,
+                timeout_seconds=timeout_seconds,
+                event_callback=lambda channel, message: _emit_headless_log(log_emitter, channel=channel, message=message),
+                session_id=session_id,
+            )
 
-        if exit_code != 0:
+            combined_stdout = result.stdout.strip()
+            combined_stderr = result.stderr.strip()
+            exit_code = result.exit_code
+
+            if result.timed_out:
+                failure_message = combined_stderr or combined_stdout or "Supervised prompt runner timed out by policy."
+                return {
+                    "ok": False,
+                    "error": {"code": "prompt_dispatch_timeout", "message": failure_message},
+                    "output": {
+                        "stdout": combined_stdout,
+                        "stderr": combined_stderr,
+                        "exit_code": exit_code,
+                    },
+                }, True
+
+            if exit_code == 0:
+                return combined_stdout or combined_stderr, True
+
             failure_message = combined_stderr or combined_stdout or f"Supervised prompt runner exited with code {exit_code}."
-            return {
+            last_failure = {
                 "ok": False,
                 "error": {"code": "prompt_dispatch_failed", "message": failure_message},
                 "output": {
@@ -353,9 +425,14 @@ async def _invoke_streamable_tool(
                     "stderr": combined_stderr,
                     "exit_code": exit_code,
                 },
-            }, True
+            }
 
-        return combined_stdout or combined_stderr, True
+            if not _is_retryable_prompt_failure(failure_message):
+                # Non-retryable failure — return immediately
+                return last_failure, True
+
+        # All retries exhausted — return the last recorded failure
+        return last_failure, True
 
     if tool_name != "execute_cli_command":
         return None, False

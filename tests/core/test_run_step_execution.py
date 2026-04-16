@@ -381,7 +381,7 @@ async def test_runner_returns_malformed_json_hint_before_tool_execution():
 
     agent = Agent(name="test", tools=[required_tool])
     response = ModelResponse(
-        output=[get_function_tool_call("required_tool", "{url: https://example.com")],
+        output=[get_function_tool_call("required_tool", "!!!TOTALLY_INVALID_ARGS!!!")],
         usage=Usage(),
         referenceable_id=None,
     )
@@ -397,6 +397,7 @@ async def test_runner_returns_malformed_json_hint_before_tool_execution():
     )
     assert context_wrapper.last_tool_validation["error"] == "tool_arguments_malformed_json"
     assert context_wrapper.last_tool_validation["malformed_json"] is True
+    assert result.generated_items[1].raw_item["arguments"] == "!!!TOTALLY_INVALID_ARGS!!!"
 
 
 @pytest.mark.asyncio

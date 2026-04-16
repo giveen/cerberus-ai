@@ -331,7 +331,12 @@ async def test_file_search_tool_call_parsed_correctly():
 @pytest.mark.asyncio
 async def test_function_web_search_tool_call_parsed_correctly():
     agent = Agent(name="test")
-    web_search_call = ResponseFunctionWebSearch(id="w1", status="completed", type="web_search_call")
+    web_search_call = ResponseFunctionWebSearch(
+        id="w1",
+        status="completed",
+        type="web_search_call",
+        action={"type": "search", "query": "test query"},
+    )
     response = ModelResponse(
         output=[get_text_message("hello"), web_search_call],
         usage=Usage(),

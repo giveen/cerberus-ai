@@ -684,7 +684,7 @@ class PolicyEngine:
             for key, value in payload.items():
                 key_lower = str(key).lower()
                 if isinstance(value, str):
-                    if any(token in key_lower for token in _PATH_KEYWORDS):
+                    if self._is_path_like_key(key_lower):
                         paths.append(value.strip())
                     paths.extend(self._extract_paths_from_text(value))
                 elif isinstance(value, (dict, list)):
@@ -693,6 +693,31 @@ class PolicyEngine:
             for item in payload:
                 paths.extend(self._extract_paths_from_payload(item))
         return [path for path in paths if path]
+
+    @staticmethod
+    def _is_path_like_key(key: str) -> bool:
+        """Return True for path-like keys while avoiding substring collisions.
+
+        This intentionally avoids naive substring checks so keys like
+        "profile" are not mistaken for file/path keys.
+        """
+        normalized = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
+        if not normalized:
+            return False
+
+        parts = tuple(part for part in normalized.split("_") if part)
+        if any(part in _PATH_KEYWORDS for part in parts):
+            return True
+
+        return normalized in {
+            "filepath",
+            "filename",
+            "directory",
+            "workdir",
+            "cwd",
+            "output_path",
+            "input_path",
+        }
 
     @staticmethod
     def _extract_paths_from_text(text: str) -> list[str]:

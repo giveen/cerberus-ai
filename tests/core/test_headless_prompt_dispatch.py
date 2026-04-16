@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from cerberus.main import _PROMPT_DISPATCH_AGENT_ENV, _PROMPT_DISPATCH_GLOBAL_AGENT_ENV
+from cerberus.main import _PROMPT_DISPATCH_AGENT_ENV, _PROMPT_DISPATCH_CONTAINER_PYTHON, _PROMPT_DISPATCH_GLOBAL_AGENT_ENV
 from cerberus.main import _invoke_streamable_tool, execute_headless_action
 from cerberus.utils.process_handler import StreamedSubprocessResult
 
@@ -182,8 +182,43 @@ async def test_invoke_streamable_tool_uses_container_python_when_active_containe
 
     assert handled is True
     assert output == "Hello from the LLM"
-    assert captured["argv"][0] == "python3"
+    assert captured["argv"][0] == _PROMPT_DISPATCH_CONTAINER_PYTHON
     assert captured["env"]["CERBERUS_ACTIVE_CONTAINER"] == "cerberus"
+    assert "PYTHONPATH" not in captured["env"]
+
+
+@pytest.mark.asyncio
+async def test_invoke_streamable_tool_uses_explicit_source_root_for_pythonpath_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def _fake_run_streaming_subprocess(**kwargs):
+        captured.update(kwargs)
+        return StreamedSubprocessResult(
+            stdout="Hello from the LLM\n",
+            stderr="",
+            stdout_truncated=False,
+            stderr_truncated=False,
+            exit_code=0,
+            timed_out=False,
+            pid=None,
+        )
+
+    monkeypatch.setenv("CERBERUS_SOURCE_ROOT", "/workspace")
+    monkeypatch.setattr("cerberus.main.run_streaming_subprocess", _fake_run_streaming_subprocess)
+
+    output, handled = await _invoke_streamable_tool(
+        "run_supervised_prompt",
+        {"prompt": "Hello"},
+        None,
+        project_root=tmp_path,
+        workspaces_root=tmp_path / "workspaces",
+    )
+
+    assert handled is True
+    assert output == "Hello from the LLM"
+    assert captured["env"]["PYTHONPATH"].split(":")[0] == "/workspace/src"
 
 
 @pytest.mark.asyncio

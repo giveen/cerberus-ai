@@ -77,10 +77,13 @@ class FakeStreamingModel(Model):
                     type="response.output_text.delta",
                     output_index=0,
                     item_id=item.id,
+                    logprobs=[],
+                    sequence_number=0,
                 )
 
         yield ResponseCompletedEvent(
             type="response.completed",
+            sequence_number=0,
             response=get_response_obj(output),
         )
 
@@ -131,7 +134,7 @@ async def test_single_agent_workflow(monkeypatch) -> None:
                 "status": "completed",
                 "type": "message",
             },
-            {"call_id": "2", "output": "tool_result", "type": "function_call_output"},
+            {"call_id": "2", "output": "tool_result", "type": "function_call_output", "name": "some_function", "arguments": '{"a": "b"}'},
             {
                 "id": "1",
                 "content": [{"annotations": [], "text": "done", "type": "output_text"}],
@@ -167,7 +170,7 @@ async def test_single_agent_workflow(monkeypatch) -> None:
                 "status": "completed",
                 "type": "message",
             },
-            {"call_id": "2", "output": "tool_result", "type": "function_call_output"},
+            {"call_id": "2", "output": "tool_result", "type": "function_call_output", "name": "some_function", "arguments": '{"a": "b"}'},
             {
                 "id": "1",
                 "content": [{"annotations": [], "text": "done", "type": "output_text"}],

@@ -46,6 +46,8 @@ The runtime inherits its OpenAI-compatible LLM endpoint from `../.env`, for exam
 
 Do not point that value at `http://localhost:8001` or `http://127.0.0.1:8001`. Port `8001` is the Reflex dashboard backend, not an LLM API, so LiteLLM/OpenAI calls will return 404 there.
 
+LiteLLM runs in client mode by default in this stack, so proxy/cold-storage message logging is disabled unless you explicitly opt in. Set `CERBERUS_LITELLM_MESSAGE_LOGGING=1` only when proxy extras are intentionally installed (for example `litellm[proxy]` with `orjson`) and you need that logging path.
+
 If you only start the default stack, the runtime container is not launched and those Kali tools are not available to the operator path.
 
 ## Development Overlay

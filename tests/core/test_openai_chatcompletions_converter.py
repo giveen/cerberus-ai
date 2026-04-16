@@ -43,7 +43,11 @@ from cerberus.sdk.agents.agent_output import AgentOutputSchema
 from cerberus.sdk.agents.exceptions import UserError
 from cerberus.sdk.agents.items import TResponseInputItem
 from cerberus.sdk.agents.models.fake_id import FAKE_RESPONSES_ID
-from cerberus.sdk.agents.models.openai_chatcompletions import _Converter, _parse_tool_args
+from cerberus.sdk.agents.models.openai_chatcompletions import (
+    _Converter,
+    _parse_tool_args,
+    _sanitize_llm_tool_args,
+)
 
 
 @pytest.fixture
@@ -94,8 +98,21 @@ def test_parse_tool_args_returns_dict_for_valid_json() -> None:
 
 
 def test_parse_tool_args_returns_none_for_invalid_json_instead_of_empty_dict() -> None:
+    # "COMMITTING_JSON: {target: 192.168.0.4}" is recoverable by json_repair,
+    # which extracts {"target": "192.168.0.4"}.  The function should return the
+    # repaired dict rather than None or an empty dict.
     parsed = _parse_tool_args("COMMITTING_JSON: {target: 192.168.0.4}", "nmap")
-    assert parsed is None
+    assert parsed == {"target": "192.168.0.4"}
+
+    # Truly unrecoverable input (no dict structure at all) must return None
+    parsed_none = _parse_tool_args("!!!PURE_GARBAGE!!!", "nmap")
+    assert parsed_none is None
+
+
+def test_sanitize_llm_tool_args_does_not_inject_empty_object_fallback() -> None:
+    assert _sanitize_llm_tool_args(None) == ""
+    assert _sanitize_llm_tool_args("   ") == ""
+    assert _sanitize_llm_tool_args("<tool_response>ignored") == ""
 
 
 def test_message_to_output_items_with_tool_call(converter):

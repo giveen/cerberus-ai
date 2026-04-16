@@ -78,6 +78,7 @@ services:
     restart: on-failure
     deploy:
       restart_policy:
+        condition: on-failure
         max_attempts: 5
 
   redis:

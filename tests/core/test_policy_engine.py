@@ -229,3 +229,16 @@ def test_verify_high_risk_command_can_be_manually_approved(tmp_path):
     assert approved_report.manual_approval_required is False
     assert approved_report.requires_approval is False
     assert approved_report.risk_level == "HIGH"
+
+
+def test_profile_key_is_not_treated_as_path_keyword(tmp_path):
+    engine = PolicyEngine(workspace_dir=str(tmp_path), project_id="eng-1")
+
+    extracted = engine._extract_paths_from_payload(
+        {
+            "profile": "BALANCED",
+            "fallback_profile": "DEFAULT",
+        }
+    )
+
+    assert extracted == []

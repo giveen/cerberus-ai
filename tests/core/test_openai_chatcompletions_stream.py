@@ -88,6 +88,7 @@ async def test_stream_response_yields_events_for_text_content(monkeypatch) -> No
     # output_item.done, and finally response.completed.
     # There should be 8 events in total.
     assert len(output_events) == 8
+    assert [event.sequence_number for event in output_events] == list(range(len(output_events)))
     # First event indicates creation.
     assert output_events[0].type == "response.created"
     # The output item added and content part added events should mark the assistant message.
@@ -175,6 +176,7 @@ async def test_stream_response_yields_events_for_refusal_content(monkeypatch) ->
     # Expect sequence similar to text: created, output_item.added, content part added,
     # two refusal delta events, content part done, output_item.done, completed.
     assert len(output_events) == 8
+    assert [event.sequence_number for event in output_events] == list(range(len(output_events)))
     assert output_events[0].type == "response.created"
     assert output_events[1].type == "response.output_item.added"
     assert output_events[2].type == "response.content_part.added"
@@ -262,6 +264,7 @@ async def test_stream_response_yields_events_for_tool_call(monkeypatch) -> None:
     # Sequence should be: response.created, then after loop we expect function call-related events:
     # one response.output_item.added for function call, a response.function_call_arguments.delta,
     # a response.output_item.done, and finally response.completed.
+    assert [event.sequence_number for event in output_events] == list(range(len(output_events)))
     assert output_events[0].type == "response.created"
     # The next three events are about the tool call.
     assert output_events[1].type == "response.output_item.added"
@@ -346,18 +349,14 @@ async def test_stream_response_handles_snapshot_style_tool_call_chunks(monkeypat
     ):
         output_events.append(event)
 
+    assert [event.sequence_number for event in output_events] == list(range(len(output_events)))
     assert output_events[1].type == "response.output_item.added"
     added_fn = output_events[1].item
     assert isinstance(added_fn, ResponseFunctionToolCall)
     assert added_fn.call_id == "call_handoff_1"
     assert added_fn.name == "handoff_to_recon"
     assert added_fn.arguments == '{"target":"10.0.0.5"}'
-    assert output_events[2].delta == "arg1arg2"
-    assert output_events[3].type == "response.output_item.done"
-    assert output_events[4].type == "response.completed"
-    assert added_fn.name == "my_func"  # Name should be concatenation of both chunks.
-    assert added_fn.arguments == "arg1arg2"
     assert output_events[2].type == "response.function_call_arguments.delta"
-    assert output_events[2].delta == "arg1arg2"
+    assert output_events[2].delta == '{"target":"10.0.0.5"}'
     assert output_events[3].type == "response.output_item.done"
     assert output_events[4].type == "response.completed"

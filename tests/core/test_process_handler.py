@@ -151,6 +151,7 @@ async def test_run_streaming_container_exec_forwards_runtime_env_to_docker_exec(
         env={
             "CERBERUS_MODEL": "Qwen3.5-27B-Aggressive-Q4_K_M",
             "OPENAI_API_KEY": "sk-local",
+            "PYTHONPATH": "/workspace/src",
             "WORKSPACE_ROOT": "/workspace/workspaces/dashboard-agent-1",
             "UNRELATED": "drop-me",
         },
@@ -173,6 +174,7 @@ async def test_run_streaming_container_exec_forwards_runtime_env_to_docker_exec(
     assert recorded["environment"] == {
         "CERBERUS_MODEL": "Qwen3.5-27B-Aggressive-Q4_K_M",
         "OPENAI_API_KEY": "sk-local",
+        "PYTHONPATH": "/workspace/src",
         "WORKSPACE_ROOT": "/workspace/workspaces/dashboard-agent-1",
     }
 

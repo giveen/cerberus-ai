@@ -107,9 +107,11 @@ class CerebroNmapTool:
 
     PROFILES: Dict[str, List[str]] = {
         "STEALTH": ["-sS", "-sV", "-O", "-n", "-Pn", "-T2", "--randomize-hosts", "--max-retries", "2"],
-        "AGGRESSIVE": ["-A", "-T4"],
-        "QUICK_UDP": ["-sU", "--top-ports", "40", "-T3", "-sV"],
-        "BALANCED": ["-sV", "-O", "-T3"],
+        "AGGRESSIVE": ["-A", "-T4", "-n"],
+        "QUICK_UDP": ["-sU", "--top-ports", "40", "-T3", "-sV", "-n"],
+        "BALANCED": ["-sV", "-O", "-T3", "-n"],
+        "DEFAULT": ["-sV", "-O", "-T3", "-n"],
+        "MINIMAL": ["-sV", "-T2", "-n"],
     }
 
     def __init__(self) -> None:
@@ -194,7 +196,8 @@ class CerebroNmapTool:
         profile_name = (profile or "BALANCED").strip().upper()
         base_profile = self.PROFILES.get(profile_name)
         if not base_profile:
-            return self._error("invalid_profile", f"unknown scan profile: {profile}")
+            available = ", ".join(sorted(self.PROFILES.keys()))
+            return self._error("invalid_profile", f"unknown scan profile: {profile}. available: {available}")
 
         scripts_value = (nse_scripts or "").strip()
         script_error = self._validate_scripts(
@@ -600,7 +603,7 @@ class CerebroNmapTool:
 NMAP_TOOL = LazyToolProxy(CerebroNmapTool)
 
 
-@function_tool
+@function_tool(risk_tier=4)
 def nmap(
     target: str,
     args: str = "",

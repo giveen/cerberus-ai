@@ -232,9 +232,9 @@ async def test_handoffs():
 
     assert result.final_output == "done"
     assert len(result.raw_responses) == 3, "should have three model responses"
-    assert len(result.to_input_list()) == 7, (
-        "should have 7 inputs: orig input, tool call, tool result, message, handoff, handoff"
-        "result, and done message"
+    assert len(result.to_input_list()) == 8, (
+        "should have 8 inputs: orig input, tool call, tool result, message, handoff, "
+        "handoff state inject, handoff result, and done message"
     )
     assert result.last_agent == agent_1, "should have handed off to agent_1"
 
@@ -286,9 +286,9 @@ async def test_structured_output():
 
     assert result.final_output == Foo(bar="baz")
     assert len(result.raw_responses) == 3, "should have three model responses"
-    assert len(result.to_input_list()) == 10, (
+    assert len(result.to_input_list()) == 11, (
         "should have input: 2 orig inputs, function call, function call result, message, handoff, "
-        "handoff output, tool call, tool call result, final output"
+        "handoff state inject, handoff output, tool call, tool call result, final output"
     )
 
     assert result.last_agent == agent_1, "should have handed off to agent_1"
@@ -334,8 +334,8 @@ async def test_handoff_filters():
 
     assert result.final_output == "last"
     assert len(result.raw_responses) == 2, "should have two model responses"
-    assert len(result.to_input_list()) == 2, (
-        "should only have 2 inputs: orig input and last message"
+    assert len(result.to_input_list()) == 3, (
+        "should have 3 inputs: orig input, handoff state inject, and last message"
     )
 
 
@@ -713,9 +713,9 @@ async def test_streaming_events():
 
     assert result.final_output == Foo(bar="baz")
     assert len(result.raw_responses) == 3, "should have three model responses"
-    assert len(result.to_input_list()) == 10, (
+    assert len(result.to_input_list()) == 11, (
         "should have input: 2 orig inputs, function call, function call result, message, handoff, "
-        "handoff output, tool call, tool call result, final output"
+        "handoff state inject, handoff output, tool call, tool call result, final output"
     )
 
     assert result.last_agent == agent_1, "should have handed off to agent_1"

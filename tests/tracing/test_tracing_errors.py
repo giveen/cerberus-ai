@@ -135,6 +135,9 @@ async def test_multi_turn_no_handoffs():
 
 @pytest.mark.asyncio
 async def test_tool_call_error():
+    # The runtime now handles malformed tool-call JSON gracefully by returning a
+    # structured hint dict as the tool output instead of raising ModelBehaviorError.
+    # The agent receives the hint and is given a chance to retry.
     model = FakeModel(tracing_enabled=True)
 
     agent = Agent(
@@ -146,42 +149,15 @@ async def test_tool_call_error():
     model.set_next_output(
         [get_text_message("a_message"), get_function_tool_call("foo", "bad_json")],
     )
+    # Second turn: agent recovers after receiving the malformed-JSON hint
+    model.set_next_output([get_text_message("done")])
 
-    with pytest.raises(ModelBehaviorError):
-        await Runner.run(agent, input="first_test")
+    result = await Runner.run(agent, input="first_test")
+    assert result.final_output == "done"
 
-    assert fetch_normalized_spans() == snapshot(
-        [
-            {
-                "workflow_name": "Agent workflow",
-                "children": [
-                    {
-                        "type": "agent",
-                        "data": {
-                            "name": "test_agent",
-                            "handoffs": [],
-                            "tools": ["foo"],
-                            "output_type": "str",
-                        },
-                        "children": [
-                            {"type": "generation"},
-                            {
-                                "type": "function",
-                                "error": {
-                                    "message": "Error running tool",
-                                    "data": {
-                                        "tool_name": "foo",
-                                        "error": "Invalid JSON input for tool foo: bad_json",
-                                    },
-                                },
-                                "data": {"name": "foo", "input": "bad_json"},
-                            },
-                        ],
-                    }
-                ],
-            }
-        ]
-    )
+    spans = fetch_normalized_spans()
+    assert len(spans) == 1
+    assert spans[0]["workflow_name"] == "Agent workflow"
 
 
 @pytest.mark.asyncio

@@ -164,6 +164,12 @@ class AgentSession(BaseModel):
     termination_requested: bool = False
     approval_required: bool = False
     pending_action: dict[str, Any] | None = None
+    pending_approval_source: str = ""
+    pending_tool_name: str = ""
+    pending_raw_arguments: str = ""
+    pending_repaired_arguments: str = ""
+    pending_message: str = ""
+    pending_risk_tier: int = 0
     policy_history: list[dict[str, Any]] = Field(default_factory=list)
     tier_status: dict[str, str] = Field(default_factory=_default_tier_status)
     last_command: str = ""
@@ -617,11 +623,14 @@ class AgentDashboardState(rx.State):
     def hydrate_from_snapshot(self) -> None:
         if self.snapshot_hydrated:
             return
-        self.snapshot_hydrated = True
 
         restored = _deserialize_dashboard_snapshot(self.dashboard_snapshot)
         if restored is None:
-            self._persist_dashboard_snapshot()
+            # LocalStorage can arrive after initial on_load. Do not overwrite
+            # existing browser state with defaults until hydration polling ends.
+            if self.dashboard_snapshot.strip():
+                self.snapshot_hydrated = True
+                self._persist_dashboard_snapshot()
             return
 
         self.agent_sessions = restored["agent_sessions"]
@@ -631,7 +640,38 @@ class AgentDashboardState(rx.State):
         self.net_mbps = restored["net_mbps"]
         self.alert_count = restored["alert_count"]
         self.sensor_health = restored["sensor_health"]
+        self.snapshot_hydrated = True
         self._persist_dashboard_snapshot()
+
+    @rx.event(background=True)
+    async def ensure_snapshot_hydrated(self) -> None:
+        if self.snapshot_hydrated:
+            return
+
+        for _ in range(12):
+            async with self:
+                if self.snapshot_hydrated:
+                    return
+
+                restored = _deserialize_dashboard_snapshot(self.dashboard_snapshot)
+                if restored is not None:
+                    self.agent_sessions = restored["agent_sessions"]
+                    self.active_session_id = restored["active_session_id"]
+                    self.cpu_usage = restored["cpu_usage"]
+                    self.ram_usage = restored["ram_usage"]
+                    self.net_mbps = restored["net_mbps"]
+                    self.alert_count = restored["alert_count"]
+                    self.sensor_health = restored["sensor_health"]
+                    self.snapshot_hydrated = True
+                    self._persist_dashboard_snapshot()
+                    return
+
+            await asyncio.sleep(0.25)
+
+        async with self:
+            if not self.snapshot_hydrated:
+                self.snapshot_hydrated = True
+                self._persist_dashboard_snapshot()
 
     @rx.var
     def busy_count(self) -> int:
@@ -727,12 +767,14 @@ class AgentDashboardState(rx.State):
     def grid_rows(self) -> str:
         return determine_grid_layout(self.session_count)[1]
 
+    @rx.event
     def set_active_session(self, session_id: str) -> None:
         if self._index_for_session_id(session_id) is None:
             return
         self.active_session_id = session_id
         self._persist_dashboard_snapshot()
 
+    @rx.event
     def set_session_command(self, session_id: str, value: str) -> None:
         index = self._index_for_session_id(session_id)
         if index is None:
@@ -834,6 +876,31 @@ class AgentDashboardState(rx.State):
         session = self._session_copy(index)
         session.pending_action = pending_action
         session.approval_required = approval_required
+        source = ""
+        pending_tool_name = ""
+        raw_arguments = ""
+        repaired_arguments = ""
+        message = ""
+        risk_tier = 0
+        if isinstance(pending_action, dict):
+            source = str(pending_action.get("approval_source", "policy_pre_dispatch") or "").strip()
+            pending_tool_name = str(pending_action.get("tool_name", "") or "").strip()
+            raw_arguments = self._stringify_pending_arguments(pending_action.get("raw_arguments"))
+            repaired_arguments = self._stringify_pending_arguments(pending_action.get("repaired_arguments"))
+            if not repaired_arguments or repaired_arguments == "{}":
+                repaired_arguments = self._stringify_pending_arguments(pending_action.get("arguments"))
+            message = str(pending_action.get("message", "") or "").strip()
+            try:
+                risk_tier = int(pending_action.get("risk_tier", 0) or 0)
+            except Exception:
+                risk_tier = 0
+
+        session.pending_approval_source = source
+        session.pending_tool_name = pending_tool_name
+        session.pending_raw_arguments = raw_arguments
+        session.pending_repaired_arguments = repaired_arguments
+        session.pending_message = message
+        session.pending_risk_tier = risk_tier
         self._store_session(index, session)
 
     def _append_policy_history(
@@ -960,6 +1027,54 @@ class AgentDashboardState(rx.State):
         return str(output)
 
     @staticmethod
+    def _stringify_pending_arguments(value: Any) -> str:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned if cleaned else "{}"
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=True, indent=2, sort_keys=True)
+        if value is None:
+            return "{}"
+        return str(value)
+
+    @staticmethod
+    def _is_runtime_pending_approval_payload(output: Any) -> bool:
+        if not isinstance(output, dict):
+            return False
+        status = str(output.get("status", "") or "").strip().upper()
+        return status == "PENDING_APPROVAL" and output.get("error") == "tool_execution_pending_approval"
+
+    def _build_runtime_pending_action(
+        self,
+        *,
+        action: dict[str, Any],
+        output: dict[str, Any],
+    ) -> dict[str, Any]:
+        tool_name = str(output.get("tool", "") or action.get("tool_name", "")).strip()
+        raw_arguments = output.get("raw_arguments")
+        repaired_arguments = output.get("repaired_arguments")
+        parsed_arguments = output.get("arguments") if isinstance(output.get("arguments"), dict) else action.get("arguments", {})
+        risk_tier = int(output.get("risk_tier", 0) or 0)
+        return {
+            "approval_source": "runtime_tool_validation",
+            "tool_name": tool_name,
+            "status": "PENDING_APPROVAL",
+            "message": str(output.get("message", "Tool execution paused pending operator approval.") or "").strip(),
+            "policy": output.get("policy", {}),
+            "risk_tier": risk_tier,
+            "raw_arguments": raw_arguments,
+            "repaired_arguments": repaired_arguments,
+            "arguments": parsed_arguments if isinstance(parsed_arguments, dict) else {},
+            "call_id": str(output.get("call_id", "") or "").strip(),
+            "original_action": {
+                "tool_name": action.get("tool_name", ""),
+                "arguments": action.get("arguments", {}),
+                "prompt": action.get("prompt"),
+                "command": action.get("command"),
+            },
+        }
+
+    @staticmethod
     def _derive_tier_status(
         report: PolicyReport,
         *,
@@ -1040,6 +1155,12 @@ class AgentDashboardState(rx.State):
         session.termination_requested = False
         session.approval_required = False
         session.pending_action = None
+        session.pending_approval_source = ""
+        session.pending_tool_name = ""
+        session.pending_raw_arguments = ""
+        session.pending_repaired_arguments = ""
+        session.pending_message = ""
+        session.pending_risk_tier = 0
         session.command_input = ""
         session.last_command = command
         session.active_tool_name = tool_name
@@ -1108,6 +1229,12 @@ class AgentDashboardState(rx.State):
                 current_session.status = "stopped"
                 current_session.approval_required = False
                 current_session.pending_action = None
+                current_session.pending_approval_source = ""
+                current_session.pending_tool_name = ""
+                current_session.pending_raw_arguments = ""
+                current_session.pending_repaired_arguments = ""
+                current_session.pending_message = ""
+                current_session.pending_risk_tier = 0
                 current_session.active_tool_name = ""
                 current_session.status_line = "Action terminated by user."
                 if not current_session.logs or current_session.logs[-1]["content"] != "⚠️ Action Terminated by User":
@@ -1120,6 +1247,28 @@ class AgentDashboardState(rx.State):
                 return
 
             if not execution_result.ok:
+                if self._is_runtime_pending_approval_payload(execution_result.output):
+                    pending_action = self._build_runtime_pending_action(
+                        action=action,
+                        output=execution_result.output,
+                    )
+                    self._set_pending_action(index, pending_action=pending_action, approval_required=True)
+                    self._append_log(
+                        index,
+                        "Audit",
+                        f"Runtime approval required for {pending_action.get('tool_name', action.get('tool_name', 'tool'))} (Tier 4).",
+                    )
+                    self._apply_report_state(
+                        index,
+                        report,
+                        is_busy=False,
+                        status_line="Runtime approval required for repaired tool arguments.",
+                        manual_approval_granted=manual_approval_granted,
+                        status="review",
+                    )
+                    self._refresh_system_health()
+                    return
+
                 self._append_log(
                     index,
                     "Agent",
@@ -1355,19 +1504,41 @@ class AgentDashboardState(rx.State):
             if session.is_busy or not isinstance(pending_action, dict):
                 return
 
+            runtime_approval = str(pending_action.get("approval_source", "") or "").strip() == "runtime_tool_validation"
+
             session.is_busy = True
             session.status = "verifying"
             session.approval_required = False
             session.active_tool_name = str(pending_action.get("tool_name", "") or "")
-            session.status_line = "Manual approval granted. Re-verifying before dispatch."
+            session.status_line = (
+                "Runtime approval granted. Dispatching repaired tool arguments."
+                if runtime_approval
+                else "Manual approval granted. Re-verifying before dispatch."
+            )
             session.logs = [
                 *session.logs,
-                _log_entry("Audit", "Manual approval granted. Re-verifying headless action."),
+                _log_entry(
+                    "Audit",
+                    "Runtime Tier-4 approval granted. Executing with repaired arguments."
+                    if runtime_approval
+                    else "Manual approval granted. Re-verifying headless action.",
+                ),
             ][-MAX_LOG_ENTRIES:]
             self._store_session(index, session)
             self._refresh_system_health()
 
         approved_action = dict(pending_action)
+        if str(pending_action.get("approval_source", "") or "").strip() == "runtime_tool_validation":
+            repaired_arguments = pending_action.get("repaired_arguments")
+            arguments = repaired_arguments if isinstance(repaired_arguments, dict) and repaired_arguments else pending_action.get("arguments", {})
+            approved_action = {
+                "tool_name": str(pending_action.get("tool_name", "") or ""),
+                "arguments": arguments if isinstance(arguments, dict) else {},
+                "manual_approval_granted": True,
+                "approval_decision": "APPROVE",
+                "approval_source": "runtime_tool_validation",
+                "runtime_pending": pending_action,
+            }
         approved_action["manual_approval_granted"] = True
         approved_action["chat_history"] = list(session.policy_history)
         approved_action["system_state"] = self._system_state_for_session(session)
@@ -1424,16 +1595,44 @@ class AgentDashboardState(rx.State):
             if session.is_busy or not isinstance(session.pending_action, dict):
                 return
 
+            runtime_approval = str(session.pending_action.get("approval_source", "") or "").strip() == "runtime_tool_validation"
+            denied_tool = str(session.pending_action.get("tool_name", "") or "")
+
+            if runtime_approval:
+                rejection_payload = {
+                    "ok": False,
+                    "status": "REJECTED_BY_OPERATOR",
+                    "error": "tool_execution_rejected_by_operator",
+                    "tool": denied_tool,
+                    "message": "Operator rejected Tier-4 repaired arguments. Choose a safer action.",
+                    "raw_arguments": session.pending_action.get("raw_arguments"),
+                    "repaired_arguments": session.pending_action.get("repaired_arguments"),
+                    "risk_tier": session.pending_action.get("risk_tier", 4),
+                    "approval_source": "runtime_tool_validation",
+                }
+                session.logs = [
+                    *session.logs,
+                    _log_entry("Audit", f"Runtime approval denied for {denied_tool or 'tool'}; rejection payload returned to orchestration context."),
+                    _log_entry("Tool", self._format_execution_output(rejection_payload)),
+                ][-MAX_LOG_ENTRIES:]
+
             session.pending_action = None
             session.approval_required = False
+            session.pending_approval_source = ""
+            session.pending_tool_name = ""
+            session.pending_raw_arguments = ""
+            session.pending_repaired_arguments = ""
+            session.pending_message = ""
+            session.pending_risk_tier = 0
             session.is_busy = False
             session.status = "blocked"
             session.status_line = "Operator denied the high-risk action."
             session.tier_status["tier_4"] = "blocked"
-            session.logs = [
-                *session.logs,
-                _log_entry("Audit", "Manual approval denied. Action was not dispatched."),
-            ][-MAX_LOG_ENTRIES:]
+            if not runtime_approval:
+                session.logs = [
+                    *session.logs,
+                    _log_entry("Audit", "Manual approval denied. Action was not dispatched."),
+                ][-MAX_LOG_ENTRIES:]
             self._store_session(index, session)
             self._refresh_system_health()
 
@@ -1737,7 +1936,30 @@ def render_log_entry(entry: dict[str, str]) -> rx.Component:
                 class_name="user-card",
                 width="100%",
             ),
-            rx.box(display="none"),
+            rx.box(
+                rx.vstack(
+                    rx.hstack(
+                        rx.text(entry["role"], color=MUTED_TEXT, font_size="0.72rem", font_weight="700", letter_spacing="0.06em"),
+                        rx.spacer(),
+                        rx.text(entry["timestamp"], color="#5B7A70", font_size="0.68rem"),
+                        width="100%",
+                        align="center",
+                    ),
+                    rx.markdown(
+                        entry["content"],
+                        class_name="response-markdown",
+                        use_raw=False,
+                        width="100%",
+                    ),
+                    spacing="3",
+                    align="stretch",
+                    width="100%",
+                ),
+                class_name="response-card",
+                width="100%",
+                background="linear-gradient(180deg, rgba(9, 14, 12, 0.92) 0%, rgba(4, 8, 7, 0.9) 100%)",
+                border="1px solid rgba(96, 130, 119, 0.28)",
+            ),
         ),
     )
 
@@ -1761,6 +1983,103 @@ def terminal_window(session: AgentSession) -> rx.Component:
             border_radius="0",
             padding="24px 24px 28px 24px",
         ),
+        rx.cond(
+            session.approval_required & (session.pending_approval_source == "runtime_tool_validation"),
+            rx.box(
+                rx.vstack(
+                    rx.text("PENDING APPROVAL", color="#FF6B6B", font_size="0.9rem", font_weight="700", letter_spacing="0.09em"),
+                    rx.hstack(
+                        rx.text("Tool:", color=TEXT_PRIMARY, font_size="0.78rem", font_weight="700"),
+                        rx.text(
+                            rx.cond(session.pending_tool_name == "", "unknown", session.pending_tool_name),
+                            color=TEXT_PRIMARY,
+                            font_size="0.78rem",
+                        ),
+                        width="100%",
+                        align="center",
+                    ),
+                    rx.text(
+                        rx.cond(session.pending_message == "", "Repaired tool arguments require operator approval.", session.pending_message),
+                        color="#FFD166",
+                        font_size="0.74rem",
+                    ),
+                    rx.text(
+                        "Raw Arguments",
+                        color=MUTED_TEXT,
+                        font_size="0.67rem",
+                        text_transform="uppercase",
+                        letter_spacing="0.08em",
+                    ),
+                    rx.el.pre(
+                        session.pending_raw_arguments,
+                        width="100%",
+                        max_height="110px",
+                        overflow="auto",
+                        background="rgba(0, 0, 0, 0.8)",
+                        border="1px solid rgba(255, 107, 107, 0.35)",
+                        border_radius="10px",
+                        padding="10px",
+                        color="#FFC9C9",
+                        font_size="0.66rem",
+                        white_space="pre-wrap",
+                    ),
+                    rx.text(
+                        "Repaired Arguments",
+                        color=MUTED_TEXT,
+                        font_size="0.67rem",
+                        text_transform="uppercase",
+                        letter_spacing="0.08em",
+                    ),
+                    rx.el.pre(
+                        session.pending_repaired_arguments,
+                        width="100%",
+                        max_height="110px",
+                        overflow="auto",
+                        background="rgba(0, 0, 0, 0.8)",
+                        border="1px solid rgba(0, 255, 255, 0.35)",
+                        border_radius="10px",
+                        padding="10px",
+                        color="#BBFFFF",
+                        font_size="0.66rem",
+                        white_space="pre-wrap",
+                    ),
+                    rx.hstack(
+                        rx.button(
+                            "Reject",
+                            on_click=AgentDashboardState.deny_pending_action(session.session_id),
+                            background="rgba(255, 107, 107, 0.12)",
+                            color="#FF9B9B",
+                            border="1px solid rgba(255, 107, 107, 0.65)",
+                            width="100%",
+                            _hover={"background": "rgba(255, 107, 107, 0.2)"},
+                        ),
+                        rx.button(
+                            "Approve",
+                            on_click=AgentDashboardState.approve_pending_action(session.session_id),
+                            background="rgba(0, 255, 255, 0.14)",
+                            color=NEON_CYAN,
+                            border=f"1px solid {NEON_CYAN}",
+                            width="100%",
+                            _hover={"background": "rgba(0, 255, 255, 0.24)"},
+                        ),
+                        width="100%",
+                        spacing="3",
+                    ),
+                    spacing="2",
+                    width="100%",
+                    align="stretch",
+                ),
+                position="absolute",
+                inset="14px",
+                z_index="4",
+                border="1px solid rgba(255, 107, 107, 0.7)",
+                border_radius="14px",
+                background="linear-gradient(180deg, rgba(35, 6, 6, 0.94) 0%, rgba(14, 4, 4, 0.95) 100%)",
+                box_shadow="0 0 28px rgba(255, 107, 107, 0.35)",
+                padding="12px",
+            ),
+            rx.box(display="none"),
+        ),
         background="linear-gradient(180deg, rgba(4, 12, 10, 0.96) 0%, rgba(1, 5, 5, 0.96) 100%)",
         width="100%",
         height="100%",
@@ -1780,6 +2099,8 @@ def terminal_window(session: AgentSession) -> rx.Component:
             "terminal-error",
             rx.cond(session.is_busy, "terminal-busy", ""),
         ),
+        position="relative",
+        overflow="hidden",
     )
 
 
@@ -1945,7 +2266,7 @@ def active_command_form(session: AgentSession) -> rx.Component:
             rx.hstack(
                 rx.el.textarea(
                     value=session.command_input,
-                    on_change=AgentDashboardState.set_session_command(session.session_id),
+                    on_change=lambda value: AgentDashboardState.set_session_command(session.session_id, value),
                     auto_height=True,
                     custom_attrs={
                         "data-command-submit": "true",
@@ -2196,87 +2517,33 @@ app = rx.App(
         ],
         head_components=[
                 rx.el.style(_render_custom_css(custom_css)),
-                rx.el.script(
-                        """
-                        (function() {
-                            function ensureObserver(el) {
-                                try {
-                                    if (el.__hasAutoScroll) return;
-                                    el.__hasAutoScroll = true;
-                                    el.scrollTop = el.scrollHeight;
-                                    const mo = new MutationObserver(function() {
-                                        try { el.scrollTop = el.scrollHeight; } catch(e) {}
-                                    });
-                                    mo.observe(el, { childList: true, subtree: true });
-                                } catch(e) {}
-                            }
-
-                            function attachExisting() {
-                                document.querySelectorAll('.terminal-flicker').forEach(ensureObserver);
-                            }
-
-                            function startAutoScrollObservers() {
-                                if (!document.body) {
-                                    return false;
-                                }
-
-                                attachExisting();
-
-                                if (document.body.__hasTerminalBodyObserver) {
-                                    return true;
-                                }
-
-                                document.body.__hasTerminalBodyObserver = true;
-
-                                const bodyObserver = new MutationObserver((mutations) => {
-                                    for (const m of mutations) {
-                                        for (const n of m.addedNodes) {
-                                            if (n.nodeType === 1) {
-                                                if (n.classList && n.classList.contains('terminal-flicker')) ensureObserver(n);
-                                                n.querySelectorAll && n.querySelectorAll('.terminal-flicker').forEach(ensureObserver);
-                                            }
-                                        }
-                                    }
-                                });
-
-                                bodyObserver.observe(document.body, { childList: true, subtree: true });
-                                return true;
-                            }
-
-                            if (!startAutoScrollObservers()) {
-                                document.addEventListener('DOMContentLoaded', startAutoScrollObservers, { once: true });
-                            }
-
-                        })();
-                        """
-                ),
         ],
 )
-# Override the default Reflex ErrorBoundary fallback to remove the
-# built-in "Built with Reflex" attribution that appears in the
-# default error UI. Provide a minimal, private-only fallback UI.
-app.app_wraps[(55, "ErrorBoundary")] = lambda stateful: error_boundary(
-    **({"on_error": noop()} if not stateful else {}),
-    fallback_render=rx.box(
-        rx.vstack(
-            rx.heading(
-                "An error occurred while rendering this page.",
-                font_size="1.5rem",
-                font_weight="bold",
+# Override the default Reflex ErrorBoundary fallback when the runtime
+# exposes app-level wrappers (newer Reflex releases).
+if hasattr(app, "app_wraps"):
+    app.app_wraps[(55, "ErrorBoundary")] = lambda stateful: error_boundary(
+        **({"on_error": noop()} if not stateful else {}),
+        fallback_render=rx.box(
+            rx.vstack(
+                rx.heading(
+                    "An error occurred while rendering this page.",
+                    font_size="1.5rem",
+                    font_weight="bold",
+                ),
+                rx.text(
+                    "This is an application error. Refreshing may help.",
+                    opacity="0.75",
+                ),
             ),
-            rx.text(
-                "This is an application error. Refreshing may help.",
-                opacity="0.75",
-            ),
+            height="100%",
+            width="100%",
+            display="flex",
+            align_items="center",
+            justify_content="center",
+            background="#fff",
+            color="#000",
         ),
-        height="100%",
-        width="100%",
-        display="flex",
-        align_items="center",
-        justify_content="center",
-        background="#fff",
-        color="#000",
-    ),
-)
+    )
 
-app.add_page(index, route="/", on_load=AgentDashboardState.hydrate_from_snapshot)
+app.add_page(index, route="/", on_load=AgentDashboardState.ensure_snapshot_hydrated)
