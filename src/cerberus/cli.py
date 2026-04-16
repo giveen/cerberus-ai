@@ -43,7 +43,7 @@ console = Console()
 
 def __getattr__(name: str) -> Any:
     if name == "Runner":
-        from cerberus.sdk.agents.run import Runner as _Runner
+        from cerberus.agents.run import Runner as _Runner
 
         return _Runner
     if name == "get_agent_by_name":

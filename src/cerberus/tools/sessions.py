@@ -61,11 +61,11 @@ except Exception:
 def _function_tool(*args: Any, **kwargs: Any) -> Any:
     """Resolve function_tool lazily with a safe no-op fallback."""
     try:
-        from cerberus.sdk.agents.tool import function_tool as _impl
+        from cerberus.agents.tool import function_tool as _impl
         return _impl(*args, **kwargs)
     except Exception:
         try:
-            from cerberus.sdk.agents import function_tool as _impl  # type: ignore
+            from cerberus.agents import function_tool as _impl  # type: ignore
             return _impl(*args, **kwargs)
         except Exception:
             def _decorator(fn: Any) -> Any:

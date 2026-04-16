@@ -21,7 +21,7 @@ from cerberus.memory.logic import clean_data
 from cerberus.repl.commands.config import CONFIG_STORE
 from cerberus.repl.commands.shell import SecureSubprocess
 from cerberus.repl.ui.logging import get_cerberus_logger
-from cerberus.sdk.agents import function_tool
+from cerberus.agents import function_tool
 from cerberus.tools._lazy import LazyToolProxy
 from cerberus.tools.misc.cli_utils import CLI_UTILS
 from cerberus.tools.workspace import get_project_space

@@ -13,7 +13,7 @@ REDIS_URL = os.getenv("REDIS_URL", "").strip() or os.getenv("REFLEX_REDIS_URL", 
 
 
 config = rx.Config(
-    app_name="cerberus_dashboard",
+    app_name="cerberus.dashboard.app",
     frontend_port=8000,
     backend_port=8001,
     redis_url=REDIS_URL or None,

@@ -3,10 +3,10 @@ import os
 import openai
 import pytest
 
-from cerberus.sdk.agents import set_default_openai_api, set_default_openai_client, set_default_openai_key
-from cerberus.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
-from cerberus.sdk.agents.models.openai_provider import OpenAIProvider
-from cerberus.sdk.agents.models.openai_responses import OpenAIResponsesModel
+from cerberus.agents import set_default_openai_api, set_default_openai_client, set_default_openai_key
+from cerberus.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+from cerberus.agents.models.openai_provider import OpenAIProvider
+from cerberus.agents.models.openai_responses import OpenAIResponsesModel
 
 
 import os

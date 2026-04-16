@@ -7,7 +7,7 @@ from typing import cast
 import pytest
 from openai.types.responses.response_input_item_param import FunctionCallOutput
 
-from cerberus.sdk.agents import (
+from cerberus.agents import (
     Agent,
     FunctionToolResult,
     RunConfig,
@@ -16,7 +16,7 @@ from cerberus.sdk.agents import (
     ToolsToFinalOutputResult,
     UserError,
 )
-from cerberus.sdk.agents._run_impl import RunImpl
+from cerberus.agents._run_impl import RunImpl
 
 from tests.core.test_responses import get_function_tool
 

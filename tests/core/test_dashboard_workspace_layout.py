@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from rxconfig import config
 
-from cerberus_dashboard.cerberus_dashboard import (
+from cerberus.dashboard.app import (
     _build_sessions,
     _new_session,
     _next_session_slot,

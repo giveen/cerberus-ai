@@ -27,7 +27,7 @@ import pytest
 from openai import NOT_GIVEN
 from pydantic import BaseModel
 
-from cerberus.sdk.agents import (
+from cerberus.agents import (
     Agent,
     AgentOutputSchema,
     Computer,
@@ -40,7 +40,7 @@ from cerberus.sdk.agents import (
     function_tool,
     handoff,
 )
-from cerberus.sdk.agents.models.openai_responses import Converter
+from cerberus.agents.models.openai_responses import Converter
 
 
 def test_convert_tool_choice_standard_values():

@@ -7,11 +7,11 @@ from typing import Any
 import pytest
 from typing_extensions import TypedDict
 
-from cerberus.sdk.agents.agent import Agent
-from cerberus.sdk.agents.lifecycle import AgentHooks
-from cerberus.sdk.agents.run import Runner
-from cerberus.sdk.agents.run_context import RunContextWrapper, TContext
-from cerberus.sdk.agents.tool import Tool
+from cerberus.agents.agent import Agent
+from cerberus.agents.lifecycle import AgentHooks
+from cerberus.agents.run import Runner
+from cerberus.agents.run_context import RunContextWrapper, TContext
+from cerberus.agents.tool import Tool
 
 from tests.fake_model import FakeModel
 from tests.core.test_responses import (

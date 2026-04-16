@@ -15,7 +15,7 @@ services:
     volumes:
       - ../src/cerberus:/workspace/src/cerberus:rw
       - ../tools:/workspace/tools:rw
-      - ../cerberus_dashboard:/workspace/cerberus_dashboard:rw
+      - ../src/cerberus/dashboard:/workspace/src/cerberus/dashboard:rw
       - ../rxconfig.py:/workspace/rxconfig.py:rw
     environment:
       PYTHONPATH: /workspace/src

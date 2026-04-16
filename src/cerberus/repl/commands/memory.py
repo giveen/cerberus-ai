@@ -17,7 +17,7 @@ from rich.table import Table
 from rich.tree import Tree
 
 from cerberus.repl.commands.base import Command, register_command
-from cerberus.sdk.agents.models.openai_chatcompletions import (
+from cerberus.agents.models.openai_chatcompletions import (
     get_all_agent_histories, 
     get_agent_message_history,
     OpenAIChatCompletionsModel,
@@ -25,9 +25,9 @@ from cerberus.sdk.agents.models.openai_chatcompletions import (
     ACTIVE_MODEL_INSTANCES,
     PERSISTENT_MESSAGE_HISTORIES
 )
-from cerberus.sdk.agents import Agent, Runner
+from cerberus.agents import Agent, Runner
 from cerberus.repl.commands.parallel import PARALLEL_CONFIGS
-from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+from cerberus.agents.simple_agent_manager import AGENT_MANAGER
 from cerberus.memory import MemoryManager
 from cerberus.memory.memory import MemoryManager as RuntimeMemoryManager
 from cerberus.util.config import get_effective_api_base, get_effective_api_key
@@ -561,7 +561,7 @@ Model: {get_compact_model() or os.environ.get("CERBERUS_MODEL", "gpt-4")}
             # Check if user wants to apply to all agents
             if agent_identifier.lower() == "all":
                 # Get all active agents
-                from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+                from cerberus.agents.simple_agent_manager import AGENT_MANAGER
                 active_agents = AGENT_MANAGER.get_active_agents()
                 
                 if not active_agents:
@@ -583,7 +583,7 @@ Model: {get_compact_model() or os.environ.get("CERBERUS_MODEL", "gpt-4")}
                     return False
         else:
             # No agent specified - default to P1
-            from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+            from cerberus.agents.simple_agent_manager import AGENT_MANAGER
             
             # Try to get the P1 agent
             p1_agent_name = AGENT_MANAGER.get_agent_by_id("P1")
@@ -1499,7 +1499,7 @@ This session is being continued from a previous conversation that ran out of con
         """
         try:
             # Get the current agent instance and its history
-            from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+            from cerberus.agents.simple_agent_manager import AGENT_MANAGER
             from cerberus.agents import get_agent_by_name, get_available_agents
             import os
             

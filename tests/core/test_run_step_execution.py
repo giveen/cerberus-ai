@@ -7,7 +7,7 @@ import pytest
 from pydantic import BaseModel
 
 from cerberus.parsers import parse_json_lenient, parse_response
-from cerberus.sdk.agents import (
+from cerberus.agents import (
     Agent,
     MessageOutputItem,
     ModelResponse,
@@ -21,14 +21,14 @@ from cerberus.sdk.agents import (
     TResponseInputItem,
     Usage,
 )
-from cerberus.sdk.agents._run_impl import (
+from cerberus.agents._run_impl import (
     NextStepFinalOutput,
     NextStepHandoff,
     NextStepRunAgain,
     RunImpl,
     SingleStepResult,
 )
-from cerberus.sdk.agents.tool import function_tool
+from cerberus.agents.tool import function_tool
 
 from tests.core.test_responses import (
     get_final_output_message,

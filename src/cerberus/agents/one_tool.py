@@ -22,7 +22,7 @@ from typing import Any, Dict, Iterable, List, Mapping, NotRequired, Optional, Se
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-from cerberus.sdk.agents import Agent, FunctionTool, OpenAIChatCompletionsModel, function_tool
+from cerberus.agents import Agent, FunctionTool, OpenAIChatCompletionsModel, function_tool
 from cerberus.tools.all_tools import get_all_tools, get_tool
 from cerberus.tools.workspace import get_project_space
 from cerberus.util.config import get_effective_api_base, get_effective_api_key, get_effective_model

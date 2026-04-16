@@ -34,7 +34,7 @@ from cerberus.agents import get_agent_module, get_available_agents
 from cerberus.repl.commands.base import Command, register_command
 
 try:
-    from cerberus.sdk.agents import Agent
+    from cerberus.agents import Agent
 except Exception:  # pragma: no cover - optional runtime dependency
     Agent = Any  # type: ignore[assignment]
 

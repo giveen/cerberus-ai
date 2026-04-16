@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from cerberus.sdk.agents import function_tool
+from cerberus.agents import function_tool
 from cerberus.tools.common import execute_system_command
 
 

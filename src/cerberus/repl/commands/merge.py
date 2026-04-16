@@ -33,7 +33,7 @@ from cerberus.memory import MemoryManager
 from cerberus.memory.storage import EvidenceRecord, WorkspaceJSONStore
 from cerberus.repl.commands.base import FrameworkCommand, register_command
 from cerberus.repl.commands.cost import BudgetPolicy, USAGE_TRACKER, UsageRecord
-from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+from cerberus.agents.simple_agent_manager import AGENT_MANAGER
 from cerberus.tools.workspace import get_project_space
 
 

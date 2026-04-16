@@ -2,9 +2,9 @@ from typing import Optional
 
 import graphviz  # type: ignore
 
-from cerberus.sdk.agents import Agent
-from cerberus.sdk.agents.handoffs import Handoff
-from cerberus.sdk.agents.tool import Tool
+from cerberus.agents import Agent
+from cerberus.agents.handoffs import Handoff
+from cerberus.agents.tool import Tool
 
 
 def get_main_graph(agent: Agent) -> str:

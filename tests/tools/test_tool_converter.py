@@ -1,10 +1,10 @@
 import pytest
 from pydantic import BaseModel
 
-from cerberus.sdk.agents import Agent, Handoff, function_tool, handoff
-from cerberus.sdk.agents.exceptions import UserError
-from cerberus.sdk.agents.models.openai_chatcompletions import ToolConverter
-from cerberus.sdk.agents.tool import FileSearchTool, WebSearchTool
+from cerberus.agents import Agent, Handoff, function_tool, handoff
+from cerberus.agents.exceptions import UserError
+from cerberus.agents.models.openai_chatcompletions import ToolConverter
+from cerberus.agents.tool import FileSearchTool, WebSearchTool
 
 
 def some_function(a: str, b: list[int]) -> str:

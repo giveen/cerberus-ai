@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from cerberus.sdk.agents import (
+from cerberus.agents import (
     Agent,
     GuardrailFunctionOutput,
     InputGuardrail,
@@ -13,7 +13,7 @@ from cerberus.sdk.agents import (
     TResponseInputItem,
     UserError,
 )
-from cerberus.sdk.agents.guardrail import input_guardrail, output_guardrail
+from cerberus.agents.guardrail import input_guardrail, output_guardrail
 
 
 def get_sync_guardrail(triggers: bool, output_info: Any | None = None):

@@ -4,7 +4,7 @@ never makes external network calls.
 
 import pytest
 
-from cerberus.sdk.agents.tracing.processors import WorkspaceSpanExporter
+from cerberus.agents.tracing.processors import WorkspaceSpanExporter
 
 
 def test_workspace_exporter_ignores_set_api_key():

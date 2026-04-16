@@ -21,7 +21,7 @@ from openai.types.responses.response_computer_tool_call import (
     ResponseComputerToolCall,
 )
 
-from cerberus.sdk.agents import (
+from cerberus.agents import (
     Agent,
     AgentHooks,
     AsyncComputer,
@@ -31,8 +31,8 @@ from cerberus.sdk.agents import (
     RunContextWrapper,
     RunHooks,
 )
-from cerberus.sdk.agents._run_impl import ComputerAction, ToolRunComputerAction
-from cerberus.sdk.agents.items import ToolCallOutputItem
+from cerberus.agents._run_impl import ComputerAction, ToolRunComputerAction
+from cerberus.agents.items import ToolCallOutputItem
 
 
 class LoggingComputer(Computer):

@@ -22,7 +22,7 @@ from cerberus.repl.commands.config import CONFIG_STORE, _is_secret, _mask
 from cerberus.repl.commands.env import ENV_AUDITOR
 from cerberus.repl.commands.shell import SecureSubprocess
 from cerberus.repl.ui.logging import get_cerberus_logger
-from cerberus.sdk.agents import function_tool
+from cerberus.agents import function_tool
 from cerberus.tools import validation
 from cerberus.tools.workspace import get_project_space
 from cerberus.utils.process_handler import run_streaming_subprocess

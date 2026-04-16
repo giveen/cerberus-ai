@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from cerberus.sdk.agents.exceptions import UserError
-from cerberus.sdk.agents.model_settings import ModelSettings
-from cerberus.sdk.agents.models import openai_chatcompletions as occ
+from cerberus.agents.exceptions import UserError
+from cerberus.agents.model_settings import ModelSettings
+from cerberus.agents.models import openai_chatcompletions as occ
 
 
 class _AuditRecorder:

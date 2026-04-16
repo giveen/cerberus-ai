@@ -22,7 +22,7 @@ from openai import AsyncOpenAI
 
 from cerberus.agents.dfir import cerebro_dfir_orchestrator
 from cerberus.memory.logic import clean_data
-from cerberus.sdk.agents import Agent, OpenAIChatCompletionsModel
+from cerberus.agents import Agent, OpenAIChatCompletionsModel
 from cerberus.tools.all_tools import get_all_tools, get_tool
 from cerberus.tools.misc.reasoning import MODE_CRITIQUE, MODE_STRATEGY, REASONING_TOOL
 from cerberus.tools.reconnaissance.exec_code import EXEC_TOOL

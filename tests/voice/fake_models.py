@@ -7,7 +7,7 @@ import numpy as np
 import numpy.typing as npt
 
 try:
-    from cerberus.sdk.agents.voice import (
+    from cerberus.agents.voice import (
         AudioInput,
         StreamedAudioInput,
         StreamedTranscriptionSession,

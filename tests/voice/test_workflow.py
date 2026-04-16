@@ -8,10 +8,10 @@ from inline_snapshot import snapshot
 from openai.types.responses import ResponseCompletedEvent
 from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
 
-from cerberus.sdk.agents import Agent, Model, ModelSettings, ModelTracing, Tool
-from cerberus.sdk.agents.agent_output import AgentOutputSchema
-from cerberus.sdk.agents.handoffs import Handoff
-from cerberus.sdk.agents.items import (
+from cerberus.agents import Agent, Model, ModelSettings, ModelTracing, Tool
+from cerberus.agents.agent_output import AgentOutputSchema
+from cerberus.agents.handoffs import Handoff
+from cerberus.agents.items import (
     ModelResponse,
     TResponseInputItem,
     TResponseOutputItem,
@@ -19,7 +19,7 @@ from cerberus.sdk.agents.items import (
 )
 
 try:
-    from cerberus.sdk.agents.voice import SingleAgentVoiceWorkflow
+    from cerberus.agents.voice import SingleAgentVoiceWorkflow
 
     from tests.fake_model import get_response_obj
     from tests.core.test_responses import get_function_tool, get_function_tool_call, get_text_message

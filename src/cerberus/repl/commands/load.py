@@ -26,9 +26,9 @@ from cerberus.memory import MemoryManager
 from cerberus.repl.commands.base import Command, CommandError, register_command
 from cerberus.repl.commands.parallel import PARALLEL_CONFIGS, ParallelConfig
 from cerberus.repl.commands.cost import USAGE_TRACKER, UsageRecord, BudgetPolicy
-from cerberus.sdk.agents.models.openai_chatcompletions import get_all_agent_histories, get_agent_message_history
-from cerberus.sdk.agents.run_to_jsonl import load_history_from_jsonl
-from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+from cerberus.agents.models.openai_chatcompletions import get_all_agent_histories, get_agent_message_history
+from cerberus.agents.run_to_jsonl import load_history_from_jsonl
+from cerberus.agents.simple_agent_manager import AGENT_MANAGER
 from cerberus.tools.workspace import get_project_space
 
 console = Console()
@@ -36,13 +36,13 @@ DEFAULT_LEGACY_LOAD_SOURCE = "logs/last"
 
 
 def _get_agent_manager() -> Any:
-    from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER as agent_manager
+    from cerberus.agents.simple_agent_manager import AGENT_MANAGER as agent_manager
 
     return agent_manager
 
 
 def _get_history_runtime_state() -> Tuple[Dict[Any, Any], Dict[str, List[Dict[str, Any]]]]:
-    from cerberus.sdk.agents.models import openai_chatcompletions as chat_models
+    from cerberus.agents.models import openai_chatcompletions as chat_models
 
     return chat_models.ACTIVE_MODEL_INSTANCES, chat_models.PERSISTENT_MESSAGE_HISTORIES
 

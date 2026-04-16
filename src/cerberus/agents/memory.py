@@ -83,7 +83,7 @@ Environment Variables enabling the episodic memory store
 
 import os
 from openai import AsyncOpenAI
-from cerberus.sdk.agents import Agent, OpenAIChatCompletionsModel, ModelSettings
+from cerberus.agents import Agent, OpenAIChatCompletionsModel, ModelSettings
 from cerberus.tools.misc.rag import add_to_memory_semantic, add_to_memory_episodic
 
 # Get model from environment or use default

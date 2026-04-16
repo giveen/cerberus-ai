@@ -5,11 +5,11 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from cerberus.sdk.agents.tracing.processor_interface import TracingProcessor
-from cerberus.sdk.agents.tracing.processors import BackendSpanExporter, BatchTraceProcessor
-from cerberus.sdk.agents.tracing.span_data import AgentSpanData
-from cerberus.sdk.agents.tracing.spans import SpanImpl
-from cerberus.sdk.agents.tracing.traces import TraceImpl
+from cerberus.agents.tracing.processor_interface import TracingProcessor
+from cerberus.agents.tracing.processors import BackendSpanExporter, BatchTraceProcessor
+from cerberus.agents.tracing.span_data import AgentSpanData
+from cerberus.agents.tracing.spans import SpanImpl
+from cerberus.agents.tracing.traces import TraceImpl
 
 
 def get_span(processor: TracingProcessor) -> SpanImpl[AgentSpanData]:

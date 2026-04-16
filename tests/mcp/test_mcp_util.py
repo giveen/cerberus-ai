@@ -5,9 +5,9 @@ import pytest
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel
 
-from cerberus.sdk.agents import FunctionTool, RunContextWrapper
-from cerberus.sdk.agents.exceptions import AgentsException, ModelBehaviorError
-from cerberus.sdk.agents.mcp import MCPServer, MCPUtil
+from cerberus.agents import FunctionTool, RunContextWrapper
+from cerberus.agents.exceptions import AgentsException, ModelBehaviorError
+from cerberus.agents.mcp import MCPServer, MCPUtil
 
 from tests.helpers import FakeMCPServer
 

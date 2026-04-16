@@ -1,4 +1,4 @@
-from cerberus.sdk.agents._run_impl import truncate_output
+from cerberus.agents._run_impl import truncate_output
 from cerberus.tools.runners.docker import CerebroDockerTool
 
 

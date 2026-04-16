@@ -17,7 +17,7 @@ import shlex
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from cerberus.memory.logic import clean, clean_data
-from cerberus.sdk.agents import (
+from cerberus.agents import (
     Agent,
     GuardrailFunctionOutput,
     RunContextWrapper,

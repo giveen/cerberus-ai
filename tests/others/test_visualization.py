@@ -3,14 +3,14 @@ from unittest.mock import Mock
 import graphviz  # type: ignore
 import pytest
 
-from cerberus.sdk.agents import Agent
-from cerberus.sdk.agents.extensions.visualization import (
+from cerberus.agents import Agent
+from cerberus.agents.extensions.visualization import (
     draw_graph,
     get_all_edges,
     get_all_nodes,
     get_main_graph,
 )
-from cerberus.sdk.agents.handoffs import Handoff
+from cerberus.agents.handoffs import Handoff
 
 
 @pytest.fixture

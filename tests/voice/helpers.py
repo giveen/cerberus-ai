@@ -1,5 +1,5 @@
 try:
-    from cerberus.sdk.agents.voice import StreamedAudioResult
+    from cerberus.agents.voice import StreamedAudioResult
 except ImportError:
     pass
 

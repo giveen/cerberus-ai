@@ -45,7 +45,7 @@ except ImportError:
     get_project_space = None
 
 try:
-    from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+    from cerberus.agents.simple_agent_manager import AGENT_MANAGER
 except ImportError:
     AGENT_MANAGER = None
 
@@ -56,7 +56,7 @@ except ImportError:
     AgentConfig = None
 
 try:
-    from cerberus.sdk.agents.tool import function_tool
+    from cerberus.agents.tool import function_tool
 except ImportError:
     function_tool = None
 
@@ -587,7 +587,7 @@ def _get_agent_token_info() -> Dict:
     existing call sites need no changes.
     """
     try:
-        from cerberus.sdk.agents.models.openai_chatcompletions import get_current_active_model
+        from cerberus.agents.models.openai_chatcompletions import get_current_active_model
 
         model = get_current_active_model()
 
@@ -612,7 +612,7 @@ def _get_agent_token_info() -> Dict:
                 "total_cost": getattr(model, "total_cost", 0.0),
             }
 
-        from cerberus.sdk.agents.models.openai_chatcompletions import ACTIVE_MODEL_INSTANCES
+        from cerberus.agents.models.openai_chatcompletions import ACTIVE_MODEL_INSTANCES
 
         if ACTIVE_MODEL_INSTANCES:
             latest_key = max(ACTIVE_MODEL_INSTANCES.keys(), key=lambda x: x[1])

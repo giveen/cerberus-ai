@@ -235,7 +235,7 @@ module = "sounddevice.*"
 ignore_missing_imports = true
 
 [tool.coverage.run]
-source = ["tests", "src/cerberus/sdk/agents"]
+source = ["tests", "src/cerberus/agents"]
 
 [tool.coverage.report]
 show_missing = true

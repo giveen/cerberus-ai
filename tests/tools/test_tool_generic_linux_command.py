@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 os.environ["OPENAI_API_KEY"] = "test_key_for_ci_environment"
 
 from cerberus.tools.reconnaissance.generic_linux_command import generic_linux_command
-from cerberus.sdk.agents import RunContextWrapper
+from cerberus.agents import RunContextWrapper
 
 
 @pytest.mark.asyncio

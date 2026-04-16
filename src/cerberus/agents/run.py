@@ -80,7 +80,7 @@ from cerberus.tools.sessions import (
     set_current_toolbox_session_id,
     set_run_context_toolbox_session_id,
 )
-from cerberus.sdk.planner.executor import select_tools_for_execution
+from cerberus.planner.executor import select_tools_for_execution
 
 
 _ACTIVE_STREAMED_RESULTS: "weakref.WeakSet[RunResultStreaming]" = weakref.WeakSet()
@@ -937,7 +937,7 @@ class Runner:
 
             if is_swarm_pattern(previous_agent) or is_swarm_pattern(current_agent):
                 if cls._set_model_message_history(current_agent, previous_history):
-                    from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+                    from cerberus.agents.simple_agent_manager import AGENT_MANAGER
 
                     AGENT_MANAGER.share_swarm_history(previous_agent.name, current_agent.name)
                 return
@@ -1289,7 +1289,7 @@ class Runner:
                         
                         # Register the handoff agent with AGENT_MANAGER for tracking
                         # This ensures patterns/swarms work with commands like /history and /graph
-                        from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+                        from cerberus.agents.simple_agent_manager import AGENT_MANAGER
                         if hasattr(current_agent, 'name'):
                             # For non-parallel patterns, use set_active_agent which will handle it as single agent
                             # This maintains compatibility with single agent commands

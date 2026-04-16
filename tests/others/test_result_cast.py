@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from cerberus.sdk.agents import Agent, RunResult
+from cerberus.agents import Agent, RunResult
 
 
 def create_run_result(final_output: Any) -> RunResult:

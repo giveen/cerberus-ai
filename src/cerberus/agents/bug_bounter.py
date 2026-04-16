@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 from cerberus.agents.guardrails import get_security_guardrails
-from cerberus.sdk.agents import Agent, OpenAIChatCompletionsModel
+from cerberus.agents import Agent, OpenAIChatCompletionsModel
 from cerberus.tools.all_tools import get_all_tools, get_tool
 from cerberus.tools.misc.reasoning import MODE_CRITIQUE, MODE_RISK_ASSESSMENT, MODE_STRATEGY, REASONING_TOOL
 from cerberus.tools.reconnaissance.curl import CURL_TOOL

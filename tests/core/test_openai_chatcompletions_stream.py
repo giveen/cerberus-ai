@@ -17,10 +17,10 @@ from openai.types.responses import (
     ResponseOutputText,
 )
 
-from cerberus.sdk.agents.model_settings import ModelSettings
-from cerberus.sdk.agents.models.interface import ModelTracing
-from cerberus.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
-from cerberus.sdk.agents.models.openai_provider import OpenAIProvider
+from cerberus.agents.model_settings import ModelSettings
+from cerberus.agents.models.interface import ModelTracing
+from cerberus.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+from cerberus.agents.models.openai_provider import OpenAIProvider
 
 import os
 cai_model = os.getenv('CERBERUS_MODEL', "qwen2.5:14b")

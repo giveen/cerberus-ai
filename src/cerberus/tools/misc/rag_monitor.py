@@ -22,7 +22,7 @@ from rich.table import Table
 
 from cerberus.memory.logic import clean_data
 from cerberus.repl.ui.logging import get_cerberus_logger
-from cerberus.sdk.agents import function_tool
+from cerberus.agents import function_tool
 from cerberus.tools.workspace import get_project_space
 
 KB_SECURITY = "KB_SECURITY"

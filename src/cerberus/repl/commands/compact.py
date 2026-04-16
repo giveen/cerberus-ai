@@ -292,7 +292,7 @@ class CompactCommand(Command):
 
     def _sub_status(self, _args: Optional[List[str]] = None) -> bool:
         """Print compaction settings."""
-        from cerberus.sdk.agents.models.openai_chatcompletions import (  # type: ignore[import-untyped]
+        from cerberus.agents.models.openai_chatcompletions import (  # type: ignore[import-untyped]
             get_current_active_model,
         )
 
@@ -439,7 +439,7 @@ class CompactCommand(Command):
     ) -> List[Any]:
         """Call an LLM to produce a compact bullet summary."""
         try:
-            from cerberus.sdk.agents.models.openai_chatcompletions import (  # type: ignore[import-untyped]
+            from cerberus.agents.models.openai_chatcompletions import (  # type: ignore[import-untyped]
                 get_current_active_model,
             )
 
@@ -540,8 +540,8 @@ class CompactCommand(Command):
 
     def _resolve_agent_history(self) -> Tuple[str, List[Any]]:
         """Return (agent_name, message_list) for the best available agent."""
-        from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER  # type: ignore[import-untyped]
-        from cerberus.sdk.agents.models.openai_chatcompletions import (  # type: ignore[import-untyped]
+        from cerberus.agents.simple_agent_manager import AGENT_MANAGER  # type: ignore[import-untyped]
+        from cerberus.agents.models.openai_chatcompletions import (  # type: ignore[import-untyped]
             get_agent_message_history,
             get_all_agent_histories,
         )
@@ -585,8 +585,8 @@ class CompactCommand(Command):
     def _apply_history(self, agent_name: str, new_history: List[Any]) -> None:
         """Replace the live agent history with *new_history*."""
         try:
-            from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER  # type: ignore[import-untyped]
-            from cerberus.sdk.agents.models.openai_chatcompletions import (  # type: ignore[import-untyped]
+            from cerberus.agents.simple_agent_manager import AGENT_MANAGER  # type: ignore[import-untyped]
+            from cerberus.agents.models.openai_chatcompletions import (  # type: ignore[import-untyped]
                 PERSISTENT_MESSAGE_HISTORIES,
             )
 
@@ -696,7 +696,7 @@ class CompactCommand(Command):
     # ------------------------------------------------------------------ #
 
     def _show_model_table(self) -> None:
-        from cerberus.sdk.agents.models.openai_chatcompletions import (  # type: ignore[import-untyped]
+        from cerberus.agents.models.openai_chatcompletions import (  # type: ignore[import-untyped]
             get_current_active_model,
         )
         try:

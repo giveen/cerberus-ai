@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from cerberus.repl.commands.cost import CostCommand
-from cerberus.sdk.agents.global_usage_tracker import GlobalUsageTracker
+from cerberus.agents.global_usage_tracker import GlobalUsageTracker
 
 
 class TestCostCommand:

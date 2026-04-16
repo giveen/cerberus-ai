@@ -48,8 +48,8 @@ from cerberus.memory.memory import CerberusMemoryBus
 from cerberus.rag.embeddings import EmbeddingsProvider, get_embeddings_provider
 from cerberus.rag.metrics import HardwareSaturationMonitor
 from cerberus.repl.ui.logging import CerberusLogger, get_cerberus_logger
-from cerberus.sdk.agents.run_context import RunContextWrapper
-from cerberus.sdk.agents.tool import FunctionTool
+from cerberus.agents.run_context import RunContextWrapper
+from cerberus.agents.tool import FunctionTool
 from cerberus.tools.all_tools import get_tool_registry
 from cerberus.tools.reconnaissance.filesystem import PathGuard
 from cerberus.persona_runtime import build_default_persona_registry

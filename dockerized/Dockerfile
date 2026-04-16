@@ -63,7 +63,7 @@ RUN mkdir -p /etc/apt/keyrings \
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /workspace/rxconfig.py /workspace/rxconfig.py
-COPY --from=builder /workspace/cerberus_dashboard /workspace/cerberus_dashboard
+COPY --from=builder /workspace/src/cerberus/dashboard /workspace/src/cerberus/dashboard
 COPY --from=builder /workspace/.web /workspace/.web
 
 EXPOSE 8000 8001

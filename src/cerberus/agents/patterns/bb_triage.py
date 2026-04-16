@@ -9,7 +9,7 @@ complete communication network for comprehensive bug bounty and triage analysis.
 """
 from cerberus.agents.retester import retester_agent
 from cerberus.agents.bug_bounter import bug_bounter_agent
-from cerberus.sdk.agents import handoff
+from cerberus.agents import handoff
 from cerberus.util import append_instructions
 
 

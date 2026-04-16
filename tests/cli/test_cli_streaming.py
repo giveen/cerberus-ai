@@ -13,7 +13,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 
-from cerberus.sdk.agents.models.openai_chatcompletions import (
+from cerberus.agents.models.openai_chatcompletions import (
     get_agent_message_history,
     get_all_agent_histories,
     ACTIVE_MODEL_INSTANCES,
@@ -34,8 +34,8 @@ class TestCLIStreaming(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up after tests."""
         # Import here to avoid circular imports
-        from cerberus.sdk.agents.models.openai_chatcompletions import PERSISTENT_MESSAGE_HISTORIES
-        from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+        from cerberus.agents.models.openai_chatcompletions import PERSISTENT_MESSAGE_HISTORIES
+        from cerberus.agents.simple_agent_manager import AGENT_MANAGER
         
         # Clear all active model instances
         ACTIVE_MODEL_INSTANCES.clear()
@@ -54,11 +54,11 @@ class TestCLIStreaming(unittest.TestCase):
         self._test_model = None
         
         # Clear any existing message histories
-        from cerberus.sdk.agents.models.openai_chatcompletions import (
+        from cerberus.agents.models.openai_chatcompletions import (
             OpenAIChatCompletionsModel,
             PERSISTENT_MESSAGE_HISTORIES
         )
-        from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+        from cerberus.agents.simple_agent_manager import AGENT_MANAGER
         
         # Clear persistent message histories to ensure clean state
         PERSISTENT_MESSAGE_HISTORIES.clear()
@@ -76,8 +76,8 @@ class TestCLIStreaming(unittest.TestCase):
     def tearDown(self):
         """Clean up after each test."""
         # Import here to avoid circular imports
-        from cerberus.sdk.agents.models.openai_chatcompletions import PERSISTENT_MESSAGE_HISTORIES
-        from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+        from cerberus.agents.models.openai_chatcompletions import PERSISTENT_MESSAGE_HISTORIES
+        from cerberus.agents.simple_agent_manager import AGENT_MANAGER
         
         # Clear all active model instances
         ACTIVE_MODEL_INSTANCES.clear()
@@ -100,8 +100,8 @@ class TestCLIStreaming(unittest.TestCase):
     def add_to_test_message_history(self, msg):
         """Add a message to the test agent's history."""
         # Create a mock model instance for testing
-        from cerberus.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
-        from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+        from cerberus.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+        from cerberus.agents.simple_agent_manager import AGENT_MANAGER
         from openai import AsyncOpenAI
         import os
         

@@ -20,7 +20,7 @@ import subprocess  # nosec B404
 import threading
 from typing import Any, Dict, Optional
 
-from cerberus.sdk.agents import function_tool
+from cerberus.agents import function_tool
 from cerberus.memory.logic import clean_data
 from cerberus.repl.commands.shell import SecureSubprocess
 from cerberus.tools.validation import is_valid_host

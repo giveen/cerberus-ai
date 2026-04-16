@@ -1,6 +1,6 @@
 import os
 import pytest
-from cerberus.sdk.agents import Runner
+from cerberus.agents import Runner
 from cerberus.agents import get_agent_by_name
 
 

@@ -39,11 +39,11 @@ from openai.types.responses import (
 )
 from openai.types.responses.response_input_item_param import FunctionCallOutput
 
-from cerberus.sdk.agents.agent_output import AgentOutputSchema
-from cerberus.sdk.agents.exceptions import UserError
-from cerberus.sdk.agents.items import TResponseInputItem
-from cerberus.sdk.agents.models.fake_id import FAKE_RESPONSES_ID
-from cerberus.sdk.agents.models.openai_chatcompletions import (
+from cerberus.agents.agent_output import AgentOutputSchema
+from cerberus.agents.exceptions import UserError
+from cerberus.agents.items import TResponseInputItem
+from cerberus.agents.models.fake_id import FAKE_RESPONSES_ID
+from cerberus.agents.models.openai_chatcompletions import (
     _Converter,
     _parse_tool_args,
     _sanitize_llm_tool_args,

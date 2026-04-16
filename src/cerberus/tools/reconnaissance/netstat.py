@@ -5,7 +5,7 @@ Netstat tool
 import re
 
 from cerberus.tools.common import run_command   # pylint: disable=import-error
-from cerberus.sdk.agents import function_tool
+from cerberus.agents import function_tool
 
 from cerberus.tools.validation import validate_args_no_injection  # pylint: disable=import-error
 from cerberus.tools import validation  # pylint: disable=import-error

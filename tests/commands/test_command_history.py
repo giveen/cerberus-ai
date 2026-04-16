@@ -163,7 +163,7 @@ class TestHistoryCommand:
         )
         assert history_command.aliases == ["/his"]
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_no_args_with_history(
         self, mock_get_all_histories, history_command, sample_message_history
     ):
@@ -173,7 +173,7 @@ class TestHistoryCommand:
         result = history_command.handle([])
         assert result is True
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_no_args_empty_history(self, mock_get_all_histories, history_command):
         """Test handling with no arguments when history is empty."""
         mock_get_all_histories.return_value = {}
@@ -181,7 +181,7 @@ class TestHistoryCommand:
         result = history_command.handle([])
         assert result is True
 
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
     def test_handle_with_agent_name(
         self, mock_agent_manager, history_command, sample_message_history
     ):
@@ -198,7 +198,7 @@ class TestHistoryCommand:
         # It may or may not call get_message_history depending on whether history is already found
         mock_agent_manager.get_all_histories.assert_called_once()
 
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
     def test_handle_with_agent_name_with_spaces(
         self, mock_agent_manager, history_command, sample_message_history
     ):
@@ -215,7 +215,7 @@ class TestHistoryCommand:
         # The implementation finds the agent in all_histories, so get_all_histories is called
         mock_agent_manager.get_all_histories.assert_called()
 
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
     def test_handle_with_nonexistent_agent(
         self, mock_agent_manager, history_command
     ):
@@ -228,7 +228,7 @@ class TestHistoryCommand:
         result = history_command.handle(["nonexistent_agent"])
         assert result is True
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_multiple_agents_history(
         self, mock_get_all_histories, history_command, sample_message_history, complex_message_history
     ):
@@ -250,7 +250,7 @@ class TestHistoryCommand:
         # Check for any expected subcommands - update based on implementation
         assert isinstance(subcommands, list)
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_complex_history(
         self, mock_get_all_histories, history_command, complex_message_history
     ):
@@ -374,7 +374,7 @@ class TestHistoryCommand:
         assert "test_function" in result
         assert "..." in result  # Should be truncated
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_import_error(self, mock_get_all_histories, history_command):
         """Test handling when import fails."""
         # Create a new command instance and monkey patch its handle_control_panel method
@@ -400,7 +400,7 @@ class TestHistoryCommand:
         assert history_command.name == "/history"
         assert "/his" in history_command.aliases
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_with_corrupted_message(self, mock_get_all_histories, history_command):
         """Test handling when message history contains corrupted data."""
         # Create message history with missing or corrupted fields
@@ -428,7 +428,7 @@ class TestHistoryCommand:
         result = history_command.handle([])
         assert result is True
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_with_messages_parameter(
         self, mock_get_all_histories, history_command, sample_message_history
     ):
@@ -440,7 +440,7 @@ class TestHistoryCommand:
         assert result is True
 
     # Multi-agent tests
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_control_panel_multi_agent(
         self, mock_get_all_histories, history_command, multi_agent_histories
     ):
@@ -450,7 +450,7 @@ class TestHistoryCommand:
         result = history_command.handle([])
         assert result is True
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_all_subcommand(
         self, mock_get_all_histories, history_command, multi_agent_histories
     ):
@@ -460,7 +460,7 @@ class TestHistoryCommand:
         result = history_command.handle(["all"])
         assert result is True
 
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
     def test_handle_specific_agent(
         self, mock_agent_manager, history_command, multi_agent_histories
     ):
@@ -476,7 +476,7 @@ class TestHistoryCommand:
         # The implementation finds the agent in all_histories
         mock_agent_manager.get_all_histories.assert_called()
 
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
     def test_handle_agent_with_spaces(
         self, mock_agent_manager, history_command, multi_agent_histories
     ):
@@ -493,7 +493,7 @@ class TestHistoryCommand:
         # The implementation finds the agent in all_histories
         mock_agent_manager.get_all_histories.assert_called()
 
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
     def test_handle_agent_subcommand(
         self, mock_agent_manager, history_command, multi_agent_histories
     ):
@@ -509,7 +509,7 @@ class TestHistoryCommand:
         # The implementation finds the agent in all_histories
         mock_agent_manager.get_all_histories.assert_called()
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_search_subcommand(
         self, mock_get_all_histories, history_command, multi_agent_histories
     ):
@@ -519,7 +519,7 @@ class TestHistoryCommand:
         result = history_command.handle(["search", "vulnerabilities"])
         assert result is True
 
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
     def test_handle_index_subcommand(
         self, mock_agent_manager, history_command, multi_agent_histories
     ):
@@ -532,7 +532,7 @@ class TestHistoryCommand:
         assert result is True
         mock_agent_manager.get_message_history.assert_called_with("red_teamer")
 
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
     def test_handle_numbered_agents(
         self, mock_agent_manager, history_command, multi_agent_histories
     ):
@@ -548,7 +548,7 @@ class TestHistoryCommand:
         # The implementation finds the agent in all_histories
         mock_agent_manager.get_all_histories.assert_called()
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_agent_name_extraction_from_messages(
         self, mock_get_all_histories, history_command
     ):
@@ -584,7 +584,7 @@ class TestHistoryCommand:
         result = history_command.handle([])
         assert result is True
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_with_very_long_agent_names(
         self, mock_get_all_histories, history_command, sample_message_history
     ):
@@ -630,7 +630,7 @@ class TestHistoryCommandIntegration:
         """Setup for integration tests."""
         yield
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_full_conversation_history_workflow(self, mock_get_all_histories):
         """Test a complete conversation workflow and history display."""
         # Simulate a conversation building up over time
@@ -704,7 +704,7 @@ class TestHistoryCommandIntegration:
             result = cmd.handle([])
             assert result is True, f"Failed at conversation step {i + 1}"
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_edge_case_message_combinations(self, mock_get_all_histories):
         """Test various edge case message combinations."""
         edge_cases = [
@@ -747,7 +747,7 @@ class TestHistoryCommandIntegration:
             result = cmd.handle([])
             assert result is True, f"Failed at edge case {i + 1}"
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_multi_agent_conversation_flow(self, mock_get_all_histories):
         """Test a multi-agent conversation flow."""
         multi_agent_history = {
@@ -771,7 +771,7 @@ class TestHistoryCommandIntegration:
         result = cmd.handle([])
         assert result is True
 
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
     @patch("cerberus.agents.get_available_agents")
     def test_handle_agent_with_id(self, mock_get_available_agents, mock_agent_manager):
         """Test showing history for agent by ID."""
@@ -811,7 +811,7 @@ class TestHistoryCommandIntegration:
             PARALLEL_CONFIGS.clear()
             PARALLEL_CONFIGS.extend(original_configs)
     
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     @patch("cerberus.repl.commands.parallel.PARALLEL_CONFIGS")
     @patch("cerberus.agents.get_available_agents")
     def test_handle_control_panel_with_configured_agents(
@@ -854,7 +854,7 @@ class TestHistoryCommandIntegration:
         assert result is True
         # Should still succeed and show both agents (one with history, one configured)
     
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
     @patch("cerberus.agents.get_available_agents")
     def test_handle_numbered_agent_with_id(
         self, mock_get_available_agents, mock_agent_manager

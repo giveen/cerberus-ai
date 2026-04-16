@@ -3,7 +3,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
-from cerberus.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+from cerberus.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 
 
 class TestAutoCompact:
@@ -22,7 +22,7 @@ class TestAutoCompact:
         model._get_model_max_tokens = MagicMock(return_value=1000)
         
         # Test the _auto_compact_if_needed method
-        with patch('cerberus.sdk.agents.models.openai_chatcompletions.count_tokens_with_tiktoken') as mock_count:
+        with patch('cerberus.agents.models.openai_chatcompletions.count_tokens_with_tiktoken') as mock_count:
             mock_count.return_value = (850, 0)  # 85% of max
             
             with patch('cerberus.repl.commands.memory.MEMORY_COMMAND_INSTANCE') as mock_memory:
@@ -34,7 +34,7 @@ class TestAutoCompact:
                         from openai import AsyncOpenAI
                         client = AsyncMock(spec=AsyncOpenAI)
                         
-                        with patch('cerberus.sdk.agents.models.openai_chatcompletions.get_session_recorder'):
+                        with patch('cerberus.agents.models.openai_chatcompletions.get_session_recorder'):
                             model = OpenAIChatCompletionsModel(
                                 model="gpt-4",
                                 openai_client=client,
@@ -65,7 +65,7 @@ class TestAutoCompact:
         from openai import AsyncOpenAI
         client = AsyncMock(spec=AsyncOpenAI)
         
-        with patch('cerberus.sdk.agents.models.openai_chatcompletions.get_session_recorder'):
+        with patch('cerberus.agents.models.openai_chatcompletions.get_session_recorder'):
             model = OpenAIChatCompletionsModel(
                 model="gpt-4",
                 openai_client=client,
@@ -94,7 +94,7 @@ class TestAutoCompact:
         from openai import AsyncOpenAI
         client = AsyncMock(spec=AsyncOpenAI)
         
-        with patch('cerberus.sdk.agents.models.openai_chatcompletions.get_session_recorder'):
+        with patch('cerberus.agents.models.openai_chatcompletions.get_session_recorder'):
             model = OpenAIChatCompletionsModel(
                 model="gpt-4",
                 openai_client=client,
@@ -122,7 +122,7 @@ class TestAutoCompact:
         from openai import AsyncOpenAI
         client = AsyncMock(spec=AsyncOpenAI)
         
-        with patch('cerberus.sdk.agents.models.openai_chatcompletions.get_session_recorder'):
+        with patch('cerberus.agents.models.openai_chatcompletions.get_session_recorder'):
             model = OpenAIChatCompletionsModel(
                 model="gpt-4",
                 openai_client=client,
@@ -131,7 +131,7 @@ class TestAutoCompact:
             )
             
             with patch.object(model, '_get_model_max_tokens', return_value=1000):
-                with patch('cerberus.sdk.agents.models.openai_chatcompletions.count_tokens_with_tiktoken') as mock_count:
+                with patch('cerberus.agents.models.openai_chatcompletions.count_tokens_with_tiktoken') as mock_count:
                     mock_count.return_value = (600, 0)  # 60% - exceeds 50% threshold
                     
                     with patch('cerberus.repl.commands.memory.MEMORY_COMMAND_INSTANCE') as mock_memory:
@@ -159,7 +159,7 @@ class TestAutoCompact:
         from openai import AsyncOpenAI
         client = AsyncMock(spec=AsyncOpenAI)
         
-        with patch('cerberus.sdk.agents.models.openai_chatcompletions.get_session_recorder'):
+        with patch('cerberus.agents.models.openai_chatcompletions.get_session_recorder'):
             model = OpenAIChatCompletionsModel(
                 model="gpt-4", 
                 openai_client=client,
@@ -195,8 +195,8 @@ class TestAutoCompact:
         from openai import AsyncOpenAI
         from openai.types.chat import ChatCompletion, ChatCompletionMessage
         from openai.types.chat.chat_completion import Choice, CompletionUsage
-        from cerberus.sdk.agents.model_settings import ModelSettings
-        from cerberus.sdk.agents.models.interface import ModelTracing
+        from cerberus.agents.model_settings import ModelSettings
+        from cerberus.agents.models.interface import ModelTracing
         
         client = AsyncMock(spec=AsyncOpenAI)
         client.base_url = "https://api.openai.com"
@@ -224,7 +224,7 @@ class TestAutoCompact:
             )
         )
         
-        with patch('cerberus.sdk.agents.models.openai_chatcompletions.get_session_recorder'):
+        with patch('cerberus.agents.models.openai_chatcompletions.get_session_recorder'):
             model = OpenAIChatCompletionsModel(
                 model="gpt-4",
                 openai_client=client,
@@ -234,7 +234,7 @@ class TestAutoCompact:
             
             # Mock dependencies
             with patch.object(model, '_get_model_max_tokens', return_value=1000):
-                with patch('cerberus.sdk.agents.models.openai_chatcompletions.count_tokens_with_tiktoken') as mock_count:
+                with patch('cerberus.agents.models.openai_chatcompletions.count_tokens_with_tiktoken') as mock_count:
                     # First count exceeds threshold, triggers compaction
                     mock_count.side_effect = [
                         (850, 0),  # Initial high count
@@ -248,11 +248,11 @@ class TestAutoCompact:
                         with patch('cerberus.repl.commands.memory.COMPACTED_SUMMARIES', {}):
                             with patch('rich.console.Console'):
                                 # Mock all the timer and tracking functions
-                                with patch('cerberus.sdk.agents.models.openai_chatcompletions.stop_idle_timer'):
-                                    with patch('cerberus.sdk.agents.models.openai_chatcompletions.start_active_timer'):
-                                        with patch('cerberus.sdk.agents.models.openai_chatcompletions.stop_active_timer'):
-                                            with patch('cerberus.sdk.agents.models.openai_chatcompletions.start_idle_timer'):
-                                                with patch('cerberus.sdk.agents.models.openai_chatcompletions.COST_TRACKER'):
+                                with patch('cerberus.agents.models.openai_chatcompletions.stop_idle_timer'):
+                                    with patch('cerberus.agents.models.openai_chatcompletions.start_active_timer'):
+                                        with patch('cerberus.agents.models.openai_chatcompletions.stop_active_timer'):
+                                            with patch('cerberus.agents.models.openai_chatcompletions.start_idle_timer'):
+                                                with patch('cerberus.agents.models.openai_chatcompletions.COST_TRACKER'):
                                                     with patch.object(model, '_fetch_response', AsyncMock(return_value=mock_response)):
                                                         # Call get_response
                                                         result = await model.get_response(

@@ -12,8 +12,8 @@ from cerberus.repl.commands.mcp import (
     get_mcp_servers_for_agent,
     get_mcp_tools_for_agent,
 )
-from cerberus.sdk.agents import Agent
-from cerberus.sdk.agents.tool import FunctionTool
+from cerberus.agents import Agent
+from cerberus.agents.tool import FunctionTool
 
 
 class TestMCPPersistence:

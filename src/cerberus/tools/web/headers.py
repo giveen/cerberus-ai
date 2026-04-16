@@ -9,7 +9,7 @@ analysis, parameter inspection, and security vulnerability detection.
 from typing import Any
 from urllib.parse import urlparse
 import requests  # pylint: disable=E0401
-from cerberus.sdk.agents import function_tool
+from cerberus.agents import function_tool
 
 
 @function_tool(strict_mode=False)

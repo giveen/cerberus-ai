@@ -31,7 +31,7 @@ from openai import AsyncOpenAI
 
 from cerberus.agents.guardrails import get_security_guardrails
 from cerberus.agents.one_tool import CerebroAtomicRunner, ExtractionRequest
-from cerberus.sdk.agents import Agent, OpenAIChatCompletionsModel
+from cerberus.agents import Agent, OpenAIChatCompletionsModel
 from cerberus.tools.all_tools import get_all_tools, get_tool
 from cerberus.tools.misc.reasoning import (
     MODE_CRITIQUE,

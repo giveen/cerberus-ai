@@ -3,11 +3,11 @@ from __future__ import annotations
 import os
 import pytest
 
-from cerberus.sdk.agents.models import _openai_shared
-from cerberus.sdk.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
-from cerberus.sdk.agents.models.openai_responses import OpenAIResponsesModel
-from cerberus.sdk.agents.tracing import set_trace_processors
-from cerberus.sdk.agents.tracing.setup import GLOBAL_TRACE_PROVIDER
+from cerberus.agents.models import _openai_shared
+from cerberus.agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+from cerberus.agents.models.openai_responses import OpenAIResponsesModel
+from cerberus.agents.tracing import set_trace_processors
+from cerberus.agents.tracing.setup import GLOBAL_TRACE_PROVIDER
 
 from tests.testing_processor import SPAN_PROCESSOR_TESTING
 

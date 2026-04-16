@@ -71,7 +71,7 @@ class TestFlushCommand:
         assert flush_command.description == "Clear conversation history (all agents by default, or specific agent)"
         assert flush_command.aliases == ["/clear"]
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_no_args_shows_help(self, mock_get_all, flush_command):
         """Test handling with no arguments shows help menu."""
         mock_get_all.return_value = {
@@ -83,7 +83,7 @@ class TestFlushCommand:
         # Should not clear anything, just show help
         mock_get_all.assert_called_once()
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
     def test_handle_no_args_empty_histories(self, mock_get_all, flush_command):
         """Test handling with no arguments when no histories exist."""
         mock_get_all.return_value = {}
@@ -91,8 +91,8 @@ class TestFlushCommand:
         assert result is True
         mock_get_all.assert_called_once()
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_agent_message_history")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_agent_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_agent_message_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_agent_history")
     def test_handle_with_agent_name(self, mock_clear_agent, mock_get_history, flush_command):
         """Test handling with specific agent name."""
         mock_get_history.return_value = []
@@ -100,8 +100,8 @@ class TestFlushCommand:
         assert result is True
         mock_clear_agent.assert_called_once_with("red_teamer")
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_agent_message_history")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_agent_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_agent_message_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_agent_history")
     def test_handle_with_agent_name_with_spaces(self, mock_clear_agent, mock_get_history, flush_command):
         """Test handling with agent name containing spaces."""
         mock_get_history.return_value = []
@@ -109,8 +109,8 @@ class TestFlushCommand:
         assert result is True
         mock_clear_agent.assert_called_once_with("Bug Bounty Hunter")
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_agent_message_history")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_agent_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_agent_message_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_agent_history")
     def test_handle_with_numbered_agent(self, mock_clear_agent, mock_get_history, flush_command):
         """Test handling with numbered agent name."""
         mock_get_history.return_value = []
@@ -118,8 +118,8 @@ class TestFlushCommand:
         assert result is True
         mock_clear_agent.assert_called_once_with("Bug Bounty Hunter #2")
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_all_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_all_histories")
     def test_handle_all_subcommand(self, mock_clear_all, mock_get_all, flush_command):
         """Test handling 'all' subcommand."""
         mock_get_all.return_value = {}
@@ -127,8 +127,8 @@ class TestFlushCommand:
         assert result is True
         mock_clear_all.assert_called_once()
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_agent_message_history")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_agent_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_agent_message_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_agent_history")
     def test_handle_agent_subcommand(self, mock_clear_agent, mock_get_history, flush_command):
         """Test handling 'agent' subcommand."""
         mock_get_history.return_value = []
@@ -136,8 +136,8 @@ class TestFlushCommand:
         assert result is True
         mock_clear_agent.assert_called_once_with("test_agent")
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_agent_message_history")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_agent_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_agent_message_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_agent_history")
     def test_handle_nonexistent_agent(self, mock_clear_agent, mock_get_history, flush_command):
         """Test handling when clearing history for non-existent agent."""
         mock_get_history.return_value = []
@@ -158,9 +158,9 @@ class TestFlushCommand:
         assert flush_command.name == "/flush"
         assert "/clear" in flush_command.aliases
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_agent_message_history")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_agent_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_agent_message_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_agent_history")
     def test_handle_with_confirmation_message(self, mock_clear_agent, mock_get_history, mock_get_all, flush_command, capsys):
         """Test that flush command provides user feedback when clearing an agent."""
         mock_get_history.return_value = [
@@ -173,8 +173,8 @@ class TestFlushCommand:
         # Verify clear was called with the correct agent
         mock_clear_agent.assert_called_once_with("test_agent")
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_all_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_all_histories")
     def test_flush_all_with_multiple_agents(
         self, mock_clear_all, mock_get_all, flush_command
     ):
@@ -188,8 +188,8 @@ class TestFlushCommand:
         assert result is True
         mock_clear_all.assert_called_once()
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_agent_message_history")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_agent_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_agent_message_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_agent_history")
     def test_handle_with_empty_string_agent_name(self, mock_clear_agent, mock_get_history, flush_command):
         """Test handling with empty string as agent name."""
         mock_get_history.return_value = []
@@ -214,10 +214,10 @@ class TestFlushCommandIntegration:
         """Setup for integration tests."""
         yield
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_agent_message_history")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_all_histories")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_agent_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_agent_message_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_all_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_agent_history")
     def test_flush_workflow(
         self, mock_clear_agent, mock_clear_all, mock_get_all, mock_get_history
     ):
@@ -247,8 +247,8 @@ class TestFlushCommandIntegration:
         # Should not have called clear_agent again
         assert mock_clear_agent.call_count == 1  # Only from the first test
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_agent_message_history")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_agent_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_agent_message_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_agent_history")
     def test_sequential_agent_flushes(self, mock_clear_agent, mock_get_history):
         """Test flushing multiple agents sequentially."""
         mock_get_history.return_value = []
@@ -275,8 +275,8 @@ class TestFlushCommandIntegration:
         called_agents = [call[0][0] for call in mock_clear_agent.call_args_list]
         assert called_agents == agents_to_flush
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_all_agent_histories")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_all_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_all_agent_histories")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_all_histories")
     def test_flush_and_verify_empty_history(
         self, mock_clear_all, mock_get_all_histories
     ):
@@ -297,8 +297,8 @@ class TestFlushCommandIntegration:
         # After flush - histories should be empty
         mock_get_all_histories.return_value = {}
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_agent_message_history")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_agent_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_agent_message_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_agent_history")
     def test_flush_agents_with_special_characters(self, mock_clear_agent, mock_get_history):
         """Test flushing agents with special characters in names."""
         mock_get_history.return_value = []
@@ -319,9 +319,9 @@ class TestFlushCommandIntegration:
 
         assert mock_clear_agent.call_count == len(special_agents)
 
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_agent_message_history")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_agent_history")
-    @patch("cerberus.sdk.agents.parallel_isolation.PARALLEL_ISOLATION")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_agent_message_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_agent_history")
+    @patch("cerberus.agents.parallel_isolation.PARALLEL_ISOLATION")
     @patch("cerberus.agents.get_available_agents")
     def test_handle_with_agent_id(self, mock_get_available_agents, mock_parallel_isolation, mock_clear_agent, mock_get_history):
         """Test flushing agent by ID."""
@@ -355,9 +355,9 @@ class TestFlushCommandIntegration:
             PARALLEL_CONFIGS.clear()
             PARALLEL_CONFIGS.extend(original_configs)
     
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_agent_message_history")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_agent_history")
-    @patch("cerberus.sdk.agents.parallel_isolation.PARALLEL_ISOLATION")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_agent_message_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_agent_history")
+    @patch("cerberus.agents.parallel_isolation.PARALLEL_ISOLATION")
     @patch("cerberus.agents.get_available_agents")
     def test_handle_numbered_agent_with_id(self, mock_get_available_agents, mock_parallel_isolation, mock_clear_agent, mock_get_history):
         """Test flushing numbered agents with IDs."""
@@ -397,9 +397,9 @@ class TestFlushCommandIntegration:
             PARALLEL_CONFIGS.clear()
             PARALLEL_CONFIGS.extend(original_configs)
     
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.get_agent_message_history")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.clear_agent_history")
-    @patch("cerberus.sdk.agents.parallel_isolation.PARALLEL_ISOLATION")
+    @patch("cerberus.agents.models.openai_chatcompletions.get_agent_message_history")
+    @patch("cerberus.agents.models.openai_chatcompletions.clear_agent_history")
+    @patch("cerberus.agents.parallel_isolation.PARALLEL_ISOLATION")
     @patch("cerberus.repl.commands.parallel.PARALLEL_CONFIGS")
     @patch("cerberus.agents.get_available_agents")
     def test_handle_invalid_id(self, mock_get_available_agents, mock_parallel_configs, mock_parallel_isolation, mock_clear_agent, mock_get_history):

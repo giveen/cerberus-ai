@@ -22,7 +22,7 @@ from openai.types.responses import (
     ResponseOutputText,
 )
 
-from cerberus.sdk.agents import (
+from cerberus.agents import (
     ModelResponse,
     ModelSettings,
     ModelTracing,
@@ -30,7 +30,7 @@ from cerberus.sdk.agents import (
     OpenAIProvider,
     generation_span,
 )
-from cerberus.sdk.agents.models.fake_id import FAKE_RESPONSES_ID
+from cerberus.agents.models.fake_id import FAKE_RESPONSES_ID
 import os
 cai_model = os.getenv('CERBERUS_MODEL', "qwen2.5:14b")
 

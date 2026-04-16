@@ -6,9 +6,9 @@ import pytest
 from pydantic import BaseModel, ValidationError
 from typing_extensions import TypedDict
 
-from cerberus.sdk.agents import RunContextWrapper
-from cerberus.sdk.agents.exceptions import UserError
-from cerberus.sdk.agents.function_schema import function_schema
+from cerberus.agents import RunContextWrapper
+from cerberus.agents.exceptions import UserError
+from cerberus.agents.function_schema import function_schema
 
 
 def no_args_function():

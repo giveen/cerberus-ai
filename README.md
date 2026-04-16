@@ -29,7 +29,7 @@ Cerberus is released under MIT and is intended to be usable in internal platform
 ## Repository Layout
 
 - `src/cerberus/` contains mission control, tool dispatch, memory services, policy enforcement, and the headless runtime.
-- `cerberus_dashboard/` contains the Reflex web dashboard and multi-session operator surface.
+- `src/cerberus/dashboard/` contains the Reflex web dashboard and multi-session operator surface.
 - `dockerized/` contains the centralized Dockerfile, compose stack, env templates, and persistent Docker volume mounts.
 - `docs/` contains architecture, operations, model, and workflow documentation.
 

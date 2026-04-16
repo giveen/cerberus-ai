@@ -37,7 +37,7 @@ from cerberus.agents import get_available_agents
 from cerberus.memory import MemoryManager
 from cerberus.repl.commands.base import Command, CommandError, register_command
 from cerberus.repl.commands.cost import USAGE_TRACKER
-from cerberus.sdk.agents.models.openai_chatcompletions import get_all_agent_histories
+from cerberus.agents.models.openai_chatcompletions import get_all_agent_histories
 from cerberus.tools.workspace import get_project_space
 
 

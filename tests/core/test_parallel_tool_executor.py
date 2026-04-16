@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-import cerberus.sdk.agents.parallel_tool_executor as pte
-from cerberus.sdk.agents.parallel_tool_executor import ParallelToolMixin
-from cerberus.sdk.agents.run_context import RunContextWrapper
+import cerberus.agents.parallel_tool_executor as pte
+from cerberus.agents.parallel_tool_executor import ParallelToolMixin
+from cerberus.agents.run_context import RunContextWrapper
 
 
 class _DummyParallelAgent(ParallelToolMixin):

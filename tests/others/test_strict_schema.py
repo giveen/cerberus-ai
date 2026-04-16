@@ -1,7 +1,7 @@
 import pytest
 
-from cerberus.sdk.agents.exceptions import UserError
-from cerberus.sdk.agents.strict_schema import ensure_strict_json_schema
+from cerberus.agents.exceptions import UserError
+from cerberus.agents.strict_schema import ensure_strict_json_schema
 
 
 def test_empty_schema_has_additional_properties_false():

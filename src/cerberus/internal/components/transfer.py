@@ -34,7 +34,7 @@ except ImportError:
     _CUPY_AVAILABLE = False
 
 # Cerberus Core Imports
-from cerberus.sdk.agents import Agent, OpenAIChatCompletionsModel
+from cerberus.agents import Agent, OpenAIChatCompletionsModel
 from cerberus.tools.reconnaissance.filesystem import PathGuard
 from cerberus.agents.subghz_sdr_agent import CerebroFileWriter
 from cerberus.tools.all_tools import get_all_tools, get_tool

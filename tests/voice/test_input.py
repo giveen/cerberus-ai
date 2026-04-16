@@ -5,9 +5,9 @@ import numpy as np
 import pytest
 
 try:
-    from cerberus.sdk.agents import UserError
-    from cerberus.sdk.agents.voice import AudioInput, StreamedAudioInput
-    from cerberus.sdk.agents.voice.input import DEFAULT_SAMPLE_RATE, _buffer_to_audio_file
+    from cerberus.agents import UserError
+    from cerberus.agents.voice import AudioInput, StreamedAudioInput
+    from cerberus.agents.voice.input import DEFAULT_SAMPLE_RATE, _buffer_to_audio_file
 except ImportError:
     pass
 

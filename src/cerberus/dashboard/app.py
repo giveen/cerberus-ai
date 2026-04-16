@@ -18,7 +18,7 @@ from reflex.vars.base import Var
 from cerberus.main import execute_headless_action, terminate_action
 from cerberus.parsers import parse_json_lenient
 from cerberus.verification.policy_engine import PolicyEngine, PolicyReport
-from cerberus_dashboard.state import (
+from cerberus.dashboard.state import (
     KALI_DOCKER_ENVIRONMENT_BADGE,
     environment_badge_text,
     extract_execution_environment_id,

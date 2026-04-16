@@ -26,12 +26,12 @@ from cerberus.repl.commands.base import CommandError, FrameworkCommand, register
 from cerberus.repl.commands.config import CONFIG_STORE, _is_secret, _mask
 from cerberus.repl.commands.cost import CostCommand, USAGE_TRACKER
 from cerberus.repl.commands.env import ENV_AUDITOR
-from cerberus.sdk.agents.agent_registry import AGENT_REGISTRY
-from cerberus.sdk.agents.items import ItemHelpers, MessageOutputItem, ReasoningItem, ToolCallItem, ToolCallOutputItem
-from cerberus.sdk.agents.result import RunResultStreaming
-from cerberus.sdk.agents.run import DEFAULT_MAX_TURNS, RunConfig, Runner
-from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
-from cerberus.sdk.agents.stream_events import AgentUpdatedStreamEvent, RunItemStreamEvent
+from cerberus.agents.agent_registry import AGENT_REGISTRY
+from cerberus.agents.items import ItemHelpers, MessageOutputItem, ReasoningItem, ToolCallItem, ToolCallOutputItem
+from cerberus.agents.result import RunResultStreaming
+from cerberus.agents.run import DEFAULT_MAX_TURNS, RunConfig, Runner
+from cerberus.agents.simple_agent_manager import AGENT_MANAGER
+from cerberus.agents.stream_events import AgentUpdatedStreamEvent, RunItemStreamEvent
 from cerberus.tools.workspace import get_project_space
 
 console = Console()

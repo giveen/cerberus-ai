@@ -4,7 +4,7 @@ import pytest
 from openai.types.responses import ResponseOutputMessage, ResponseOutputText
 from pydantic import BaseModel
 
-from cerberus.sdk.agents import (
+from cerberus.agents import (
     Agent,
     Handoff,
     HandoffInputData,

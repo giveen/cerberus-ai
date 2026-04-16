@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 from cerberus.agents.one_tool import CerebroAtomicRunner
-from cerberus.sdk.agents import Agent, OpenAIChatCompletionsModel, function_tool
+from cerberus.agents import Agent, OpenAIChatCompletionsModel, function_tool
 from cerberus.tools.all_tools import get_all_tools, get_tool
 from cerberus.tools.misc.reasoning import MODE_CRITIQUE, MODE_STRATEGY, REASONING_TOOL, think
 from cerberus.tools.reconnaissance.filesystem import PathGuard as FilesystemPathGuard

@@ -153,7 +153,7 @@ class StateResetUtility:
         histories: Dict[str, List[Dict[str, Any]]] = {}
 
         try:
-            from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+            from cerberus.agents.simple_agent_manager import AGENT_MANAGER
 
             all_histories = AGENT_MANAGER.get_all_histories() or {}
             for agent_name, msgs in all_histories.items():
@@ -229,7 +229,7 @@ class StateResetUtility:
         cleared = 0
 
         try:
-            from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+            from cerberus.agents.simple_agent_manager import AGENT_MANAGER
 
             all_histories = AGENT_MANAGER.get_all_histories() or {}
             for name in list(all_histories.keys()):
@@ -251,7 +251,7 @@ class StateResetUtility:
             pass
 
         try:
-            from cerberus.sdk.agents.parallel_isolation import PARALLEL_ISOLATION
+            from cerberus.agents.parallel_isolation import PARALLEL_ISOLATION
 
             isolated = getattr(PARALLEL_ISOLATION, "_isolated_histories", {})
             if isinstance(isolated, dict):
@@ -263,7 +263,7 @@ class StateResetUtility:
             pass
 
         try:
-            from cerberus.sdk.agents.models.openai_chatcompletions import ACTIVE_MODEL_INSTANCES
+            from cerberus.agents.models.openai_chatcompletions import ACTIVE_MODEL_INSTANCES
 
             for _, model_ref in list(ACTIVE_MODEL_INSTANCES.items()):
                 model = model_ref() if callable(model_ref) else model_ref
@@ -279,7 +279,7 @@ class StateResetUtility:
     def _reinitialize_active_persona(self) -> bool:
         """Rebuild minimal persona context for the current active agent."""
         try:
-            from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+            from cerberus.agents.simple_agent_manager import AGENT_MANAGER
 
             active = AGENT_MANAGER.get_active_agent()
             if not active or not hasattr(active, "model"):
@@ -476,7 +476,7 @@ class FlushCommand(Command):
         return bool(result)
 
     def handle_no_args(self) -> bool:  # type: ignore[override]
-        from cerberus.sdk.agents.models.openai_chatcompletions import get_all_agent_histories
+        from cerberus.agents.models.openai_chatcompletions import get_all_agent_histories
 
         histories = get_all_agent_histories()
         if histories:
@@ -487,7 +487,7 @@ class FlushCommand(Command):
 
     def handle_all(self, args: Optional[List[str]] = None) -> bool:
         del args
-        from cerberus.sdk.agents.models.openai_chatcompletions import clear_all_histories, get_all_agent_histories
+        from cerberus.agents.models.openai_chatcompletions import clear_all_histories, get_all_agent_histories
 
         get_all_agent_histories()
         clear_all_histories()
@@ -495,11 +495,11 @@ class FlushCommand(Command):
         return True
 
     def handle_agent(self, args: Optional[List[str]] = None) -> bool:
-        from cerberus.sdk.agents.models.openai_chatcompletions import clear_agent_history, get_agent_message_history
+        from cerberus.agents.models.openai_chatcompletions import clear_agent_history, get_agent_message_history
 
         agent_name = " ".join(args or [])
         if self._is_parallel_agent_id(agent_name):
-            from cerberus.sdk.agents.parallel_isolation import PARALLEL_ISOLATION
+            from cerberus.agents.parallel_isolation import PARALLEL_ISOLATION
 
             PARALLEL_ISOLATION.get_isolated_history(agent_name)
             PARALLEL_ISOLATION.clear_agent_history(agent_name)

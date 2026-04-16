@@ -14,7 +14,7 @@ import os
 import re
 from typing import Optional
 
-from cerberus.sdk.agents import function_tool
+from cerberus.agents import function_tool
 from cerberus.tools.common import run_command_async
 
 

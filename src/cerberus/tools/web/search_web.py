@@ -4,7 +4,7 @@ from typing import Any
 
 import requests
 
-from cerberus.sdk.agents import function_tool
+from cerberus.agents import function_tool
 
 
 _DEFAULT_SEARXNG_BASE_URL = "http://searxng:8080"

@@ -62,9 +62,9 @@ class TestLoadCommand:
 
     @patch("cerberus.repl.commands.load.console.input")
     @patch("cerberus.agents.get_agent_by_name")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_handle_no_args_default_file(
         self, mock_load_jsonl, mock_agent_manager, mock_get_agent, mock_input, load_command, sample_jsonl_messages
@@ -89,9 +89,9 @@ class TestLoadCommand:
 
     @patch("cerberus.repl.commands.load.console.input")
     @patch("cerberus.agents.get_agent_by_name")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_handle_with_file_path_only(
         self, mock_load_jsonl, mock_agent_manager, mock_get_agent, mock_input, load_command, sample_jsonl_messages
@@ -115,9 +115,9 @@ class TestLoadCommand:
 
     @patch("cerberus.repl.commands.load.console.input")
     @patch("cerberus.agents.get_agent_by_name")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_handle_with_agent_name_only(
         self, mock_load_jsonl, mock_agent_manager, mock_get_agent, mock_input, load_command, sample_jsonl_messages
@@ -139,9 +139,9 @@ class TestLoadCommand:
 
     @patch("cerberus.repl.commands.load.console.input")
     @patch("cerberus.agents.get_agent_by_name")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_handle_with_agent_and_file(
         self, mock_load_jsonl, mock_agent_manager, mock_get_agent, mock_input, load_command, sample_jsonl_messages
@@ -163,9 +163,9 @@ class TestLoadCommand:
 
     @patch("cerberus.repl.commands.load.console.input")
     @patch("cerberus.agents.get_agent_by_name")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_handle_agent_with_spaces(
         self, mock_load_jsonl, mock_agent_manager, mock_get_agent, mock_input, load_command, sample_jsonl_messages
@@ -187,9 +187,9 @@ class TestLoadCommand:
 
     @patch("cerberus.repl.commands.load.console.input")
     @patch("cerberus.agents.get_agent_by_name")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_handle_agent_with_spaces_and_file(
         self, mock_load_jsonl, mock_agent_manager, mock_get_agent, mock_input, load_command, sample_jsonl_messages
@@ -220,9 +220,9 @@ class TestLoadCommand:
 
     @patch("cerberus.repl.commands.load.console.input")
     @patch("cerberus.agents.get_agent_by_name")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_handle_agent_subcommand(
         self, mock_load_jsonl, mock_agent_manager, mock_get_agent, mock_input, load_command, sample_jsonl_messages
@@ -244,9 +244,9 @@ class TestLoadCommand:
 
     @patch("cerberus.repl.commands.load.console.input")
     @patch("cerberus.agents.get_agent_by_name")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_handle_agent_subcommand_with_file(
         self, mock_load_jsonl, mock_agent_manager, mock_get_agent, mock_input, load_command, sample_jsonl_messages
@@ -277,9 +277,9 @@ class TestLoadCommand:
 
     @patch("cerberus.repl.commands.load.console.input")
     @patch("cerberus.agents.get_agent_by_name")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_load_empty_file(self, mock_load_jsonl, mock_agent_manager, mock_get_agent, mock_input, load_command):
         """Test loading an empty JSONL file."""
@@ -299,9 +299,9 @@ class TestLoadCommand:
 
     @patch("cerberus.repl.commands.load.console.input")
     @patch("cerberus.agents.get_agent_by_name")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_append_to_existing_history(
         self, mock_load_jsonl, mock_agent_manager, mock_get_agent, mock_input, load_command, sample_jsonl_messages
@@ -371,9 +371,9 @@ class TestLoadCommand:
 
     @patch("cerberus.repl.commands.load.console.input")
     @patch("cerberus.agents.get_agent_by_name")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_handle_special_characters_in_agent_name(
         self, mock_load_jsonl, mock_agent_manager, mock_get_agent, mock_input, load_command, sample_jsonl_messages
@@ -394,9 +394,9 @@ class TestLoadCommand:
 
     @patch("cerberus.repl.commands.load.console.input")
     @patch("cerberus.agents.get_agent_by_name")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_file_path_detection(
         self, mock_load_jsonl, mock_agent_manager, mock_get_agent, mock_input, load_command, sample_jsonl_messages
@@ -424,9 +424,9 @@ class TestLoadCommand:
         mock_load_jsonl.assert_called_with("/absolute/path/session.jsonl")
     
     @patch("cerberus.repl.commands.load.console.input")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.agents.get_available_agents")
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_handle_parallel_subcommand(
@@ -483,9 +483,9 @@ class TestLoadCommand:
             PARALLEL_CONFIGS.extend(original_configs)
     
     @patch("cerberus.repl.commands.load.console.input")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.agents.get_available_agents")
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_handle_parallel_no_agent_names(
@@ -559,9 +559,9 @@ class TestLoadCommandIntegration:
 
     @patch("cerberus.repl.commands.load.console.input")
     @patch("cerberus.agents.get_agent_by_name")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
-    @patch("cerberus.sdk.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.models.openai_chatcompletions.ACTIVE_MODEL_INSTANCES", {})
+    @patch("cerberus.agents.models.openai_chatcompletions.PERSISTENT_MESSAGE_HISTORIES", {})
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     @patch("cerberus.repl.commands.load.get_all_agent_histories")
     def test_full_load_workflow(
@@ -610,7 +610,7 @@ class TestLoadCommandIntegration:
         assert result is True
     
     @patch("cerberus.repl.commands.load.console.input")
-    @patch("cerberus.sdk.agents.simple_agent_manager.AGENT_MANAGER")
+    @patch("cerberus.agents.simple_agent_manager.AGENT_MANAGER")
     @patch("cerberus.agents.get_available_agents")
     @patch("cerberus.repl.commands.load.load_history_from_jsonl")
     def test_load_by_agent_id(self, mock_load_jsonl, mock_get_available, mock_agent_manager, mock_input):

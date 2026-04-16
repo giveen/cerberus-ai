@@ -22,7 +22,7 @@ from uuid import uuid4
 from openai import AsyncOpenAI
 
 from cerberus.agents.registry import AgentRegistry as PersonaAgentRegistry
-from cerberus.sdk.agents import Agent, FunctionTool, OpenAIChatCompletionsModel, function_tool
+from cerberus.agents import Agent, FunctionTool, OpenAIChatCompletionsModel, function_tool
 from cerberus.tools.all_tools import get_tool, get_tools_for_agent
 from cerberus.tools.reconnaissance.filesystem import PathGuard
 from cerberus.tools.workspace import get_project_space

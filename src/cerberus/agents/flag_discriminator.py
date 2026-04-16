@@ -20,7 +20,7 @@ from uuid import uuid4
 from openai import AsyncOpenAI
 
 from cerberus.memory.logic import clean, clean_data
-from cerberus.sdk.agents import Agent, OpenAIChatCompletionsModel
+from cerberus.agents import Agent, OpenAIChatCompletionsModel
 from cerberus.tools.misc.reasoning import MODE_CRITIQUE, MODE_STRATEGY, REASONING_TOOL
 from cerberus.tools.sessions import ACTIVE_SESSIONS, SESSIONS_LOCK
 from cerberus.tools.workspace import get_project_space

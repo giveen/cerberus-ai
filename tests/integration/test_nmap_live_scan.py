@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from cerberus.main import execute_headless_action
-from cerberus_dashboard.cerberus_dashboard import (
+from cerberus.dashboard.app import (
     AgentDashboardState,
     _build_sessions,
     _extract_prompt_response_from_lines,

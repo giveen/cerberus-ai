@@ -209,7 +209,7 @@ class ShutdownOrchestrator:
         """Cancel and gather pending asyncio tasks."""
         try:
             try:
-                from cerberus.sdk.agents.run import Runner
+                from cerberus.agents.run import Runner
 
                 await Runner.shutdown_active_streams()
             except Exception:
@@ -258,7 +258,7 @@ class ShutdownOrchestrator:
 
         # Also run the global shutdown coordinator for named process targets.
         try:
-            from cerberus.sdk.agents.shutdown_coordinator import SHUTDOWN_COORDINATOR
+            from cerberus.agents.shutdown_coordinator import SHUTDOWN_COORDINATOR
 
             targets = os.getenv("CERBERUS_SHUTDOWN_TARGETS", "")
             target_list = [t.strip() for t in targets.split(",") if t.strip()]
@@ -271,7 +271,7 @@ class ShutdownOrchestrator:
     def _finalize_usage_tracking(self, cost_usd: float) -> None:
         """Flush usage tracker end-of-session metadata."""
         try:
-            from cerberus.sdk.agents.global_usage_tracker import GLOBAL_USAGE_TRACKER
+            from cerberus.agents.global_usage_tracker import GLOBAL_USAGE_TRACKER
 
             GLOBAL_USAGE_TRACKER.end_session(final_cost=cost_usd)
         except Exception:

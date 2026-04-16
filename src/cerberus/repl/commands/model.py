@@ -30,7 +30,7 @@ from rich.table import Table
 from cerberus.memory import MemoryManager
 from cerberus.repl.commands.base import Command, CommandError, register_command
 from cerberus.repl.commands.cost import USAGE_TRACKER
-from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+from cerberus.agents.simple_agent_manager import AGENT_MANAGER
 from cerberus.tools.workspace import get_project_space
 
 

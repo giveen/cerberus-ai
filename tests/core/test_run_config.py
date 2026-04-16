@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from cerberus.sdk.agents import Agent, RunConfig, Runner
-from cerberus.sdk.agents.models.interface import Model, ModelProvider
+from cerberus.agents import Agent, RunConfig, Runner
+from cerberus.agents.models.interface import Model, ModelProvider
 
 from tests.fake_model import FakeModel
 from tests.core.test_responses import get_text_message

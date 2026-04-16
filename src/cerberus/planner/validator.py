@@ -4,7 +4,7 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Mapping, Optional
 
-from cerberus.sdk.planner.models import DependencyKind
+from cerberus.planner.models import DependencyKind
 
 
 class UnresolvedDependencyError(RuntimeError):

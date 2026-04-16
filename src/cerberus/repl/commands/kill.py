@@ -24,8 +24,8 @@ from rich.table import Table
 from cerberus.memory import MemoryManager
 from cerberus.repl.commands.base import FrameworkCommand, register_command
 from cerberus.repl.commands.parallel import PARALLEL_AGENT_INSTANCES, PARALLEL_CONFIGS
-from cerberus.sdk.agents.parallel_isolation import PARALLEL_ISOLATION
-from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+from cerberus.agents.parallel_isolation import PARALLEL_ISOLATION
+from cerberus.agents.simple_agent_manager import AGENT_MANAGER
 from cerberus.tools.sessions import ACTIVE_SESSIONS, FRIENDLY_SESSION_MAP, REVERSE_SESSION_MAP, SESSIONS_LOCK
 
 try:

@@ -36,7 +36,7 @@ from rich.table import Table
 from rich import box
 
 from cerberus.repl.commands.base import Command, CommandError, register_command
-from cerberus.sdk.agents.global_usage_tracker import GLOBAL_USAGE_TRACKER
+from cerberus.agents.global_usage_tracker import GLOBAL_USAGE_TRACKER
 from cerberus.util import COST_TRACKER
 
 __all__ = [

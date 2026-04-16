@@ -20,8 +20,8 @@ from openai.types.chat.chat_completion_message_tool_call import (
 )
 from openai.types.completion_usage import CompletionUsage
 
-from cerberus.sdk.agents import Agent, ModelResponse, OpenAIChatCompletionsModel
-from cerberus.sdk.agents.models.openai_chatcompletions import (
+from cerberus.agents import Agent, ModelResponse, OpenAIChatCompletionsModel
+from cerberus.agents.models.openai_chatcompletions import (
     get_agent_message_history,
     get_all_agent_histories,
     ACTIVE_MODEL_INSTANCES,
@@ -196,7 +196,7 @@ class BaseCLITest:
         self, content: str = "Test response", items: Optional[List] = None
     ) -> ModelResponse:
         """Create a mock ModelResponse for Runner.run."""
-        from cerberus.sdk.agents.usage import Usage
+        from cerberus.agents.usage import Usage
 
         return ModelResponse(
             output=items or [],
@@ -342,7 +342,7 @@ class BaseCLITest:
             patch("cerberus.repl.ui.prompt.get_user_input", side_effect=input_simulator),
             patch("cerberus.repl.ui.logging.setup_session_logging", return_value="test_history.txt"),
             # Session recording
-            patch("cerberus.sdk.agents.run_to_jsonl.get_session_recorder"),
+            patch("cerberus.agents.run_to_jsonl.get_session_recorder"),
             # CLI UI components
             patch("cerberus.repl.commands.FuzzyCommandCompleter"),
             patch("cerberus.repl.ui.keybindings.create_key_bindings"),
@@ -376,7 +376,7 @@ class BaseCLITest:
                     setup_session_logging=Mock(return_value="test_history.txt"),
                 ),
                 patch.multiple(
-                    "cerberus.sdk.agents.run_to_jsonl",
+                    "cerberus.agents.run_to_jsonl",
                     get_session_recorder=Mock(
                         return_value=Mock(
                             filename="test_session.jsonl",

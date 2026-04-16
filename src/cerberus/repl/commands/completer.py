@@ -237,7 +237,7 @@ class _ToolSource:
             return cls._cache[1]
         result: List[str] = []
         try:
-            from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER  # type: ignore[import-untyped]
+            from cerberus.agents.simple_agent_manager import AGENT_MANAGER  # type: ignore[import-untyped]
             agent = AGENT_MANAGER.get_active_agent()
             if agent and hasattr(agent, "tools"):
                 for t in agent.tools:

@@ -9,7 +9,7 @@ import os
 import requests
 from typing import List, Optional, Dict, Tuple
 from dotenv import load_dotenv
-from cerberus.sdk.agents import function_tool
+from cerberus.agents import function_tool
 
 
 def google_search(query: str, num_results: int = 10) -> str:

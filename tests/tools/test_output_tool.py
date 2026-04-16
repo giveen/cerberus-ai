@@ -4,9 +4,9 @@ import pytest
 from pydantic import BaseModel
 from typing_extensions import TypedDict
 
-from cerberus.sdk.agents import Agent, AgentOutputSchema, ModelBehaviorError, Runner, UserError
-from cerberus.sdk.agents.agent_output import _WRAPPER_DICT_KEY
-from cerberus.sdk.agents.util import _json
+from cerberus.agents import Agent, AgentOutputSchema, ModelBehaviorError, Runner, UserError
+from cerberus.agents.agent_output import _WRAPPER_DICT_KEY
+from cerberus.agents.util import _json
 
 
 def test_plain_text_output():

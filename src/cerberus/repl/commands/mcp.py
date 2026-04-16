@@ -28,7 +28,7 @@ from rich.table import Table
 from cerberus.agents import get_available_agents
 from cerberus.memory import MemoryManager
 from cerberus.repl.commands.base import FrameworkCommand, register_command
-from cerberus.sdk.agents.tool import FunctionTool
+from cerberus.agents.tool import FunctionTool
 from cerberus.tools.workspace import get_project_space
 
 
@@ -38,7 +38,7 @@ _log = logging.getLogger(__name__)
 
 # Optional backend: existing Cerebro MCP wrappers (if available in runtime environment).
 try:
-    from cerberus.sdk.agents.mcp import MCPServerSse, MCPServerStdio
+    from cerberus.agents.mcp import MCPServerSse, MCPServerStdio
 except Exception:  # pragma: no cover - optional runtime dependency
     MCPServerSse = None
     MCPServerStdio = None

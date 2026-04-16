@@ -151,7 +151,7 @@ class TestParallelCustomPrompts:
     def test_parallel_history_persistence_on_interrupt(self):
         """Test that parallel agents' histories are saved when interrupted."""
         # This test verifies the configuration for history persistence
-        from cerberus.sdk.agents.parallel_isolation import PARALLEL_ISOLATION
+        from cerberus.agents.parallel_isolation import PARALLEL_ISOLATION
         
         # Setup parallel configs
         config1 = ParallelConfig("redteam_agent")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cerberus_dashboard.cerberus_dashboard import (
+from cerberus.dashboard.app import (
     AgentDashboardState,
     AgentSession,
     _deserialize_dashboard_snapshot,

@@ -9,7 +9,7 @@ from tests.core.test_responses import (
     get_function_tool_call,
     get_function_tool,
 )
-from cerberus.sdk.agents import Runner
+from cerberus.agents import Runner
 from cerberus.agents.one_tool import transfer_to_one_tool_agent
 from cerberus.agents.one_tool import one_tool_agent
 

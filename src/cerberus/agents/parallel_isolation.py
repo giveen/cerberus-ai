@@ -9,7 +9,7 @@ import copy
 from typing import Dict, List, Any, Optional, Tuple
 from threading import Lock
 
-from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+from cerberus.agents.simple_agent_manager import AGENT_MANAGER
 
 
 class ParallelHistoryIsolation:

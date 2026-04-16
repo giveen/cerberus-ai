@@ -40,7 +40,7 @@ from enum import auto, Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-from cerberus.sdk.agents import Agent
+from cerberus.agents import Agent
 from cerberus.tools.reconnaissance.filesystem import PathGuard as FilesystemPathGuard
 from cerberus.util import create_system_prompt_renderer, load_prompt_template
 

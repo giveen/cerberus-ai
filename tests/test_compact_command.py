@@ -7,7 +7,7 @@ import asyncio
 import os
 from unittest.mock import Mock, patch, AsyncMock
 from cerberus.repl.commands.compact import CompactCommand
-from cerberus.sdk.agents.models.openai_chatcompletions import get_agent_message_history, get_all_agent_histories
+from cerberus.agents.models.openai_chatcompletions import get_agent_message_history, get_all_agent_histories
 
 class TestCompactCommand:
     """Test the CompactCommand class."""

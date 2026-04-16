@@ -1,7 +1,7 @@
 import pytest
 
-from cerberus.sdk.agents.exceptions import UserError
-from cerberus.sdk.agents.mcp.server import _MCPServerWithClientSession
+from cerberus.agents.exceptions import UserError
+from cerberus.agents.mcp.server import _MCPServerWithClientSession
 
 
 class CrashingClientSessionServer(_MCPServerWithClientSession):

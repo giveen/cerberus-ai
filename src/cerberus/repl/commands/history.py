@@ -25,7 +25,7 @@ from rich.table import Table
 from cerberus.memory import MemoryManager
 from cerberus.memory.logic import clean_data
 from cerberus.repl.commands.base import Command, CommandError, register_command
-from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+from cerberus.agents.simple_agent_manager import AGENT_MANAGER
 
 console = Console()
 
@@ -207,7 +207,7 @@ class HistoryCommand(Command):
         return self.handle_control_panel()
 
     def handle_control_panel(self) -> bool:
-        from cerberus.sdk.agents.models.openai_chatcompletions import get_all_agent_histories
+        from cerberus.agents.models.openai_chatcompletions import get_all_agent_histories
 
         histories = get_all_agent_histories() or {}
         self._render_legacy_history_panel("Conversation History", histories)
@@ -215,14 +215,14 @@ class HistoryCommand(Command):
 
     def handle_all(self, args: Optional[List[str]] = None) -> bool:
         del args
-        from cerberus.sdk.agents.models.openai_chatcompletions import get_all_agent_histories
+        from cerberus.agents.models.openai_chatcompletions import get_all_agent_histories
 
         histories = get_all_agent_histories() or {}
         self._render_legacy_history_panel("All Agent Histories", histories)
         return True
 
     def handle_agent(self, args: Optional[List[str]] = None) -> bool:
-        from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER as agent_manager
+        from cerberus.agents.simple_agent_manager import AGENT_MANAGER as agent_manager
 
         raw_agent_name = " ".join(args or [])
         agent_name = self._resolve_agent_name(raw_agent_name, agent_manager)
@@ -236,7 +236,7 @@ class HistoryCommand(Command):
         return True
 
     def handle_search(self, args: Optional[List[str]] = None) -> bool:
-        from cerberus.sdk.agents.models.openai_chatcompletions import get_all_agent_histories
+        from cerberus.agents.models.openai_chatcompletions import get_all_agent_histories
 
         query = " ".join(args or []).lower().strip()
         histories = get_all_agent_histories() or {}
@@ -260,7 +260,7 @@ class HistoryCommand(Command):
         return True
 
     def handle_index(self, args: Optional[List[str]] = None) -> bool:
-        from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER as agent_manager
+        from cerberus.agents.simple_agent_manager import AGENT_MANAGER as agent_manager
 
         if not args:
             self._render_legacy_history_panel("History Index", {})

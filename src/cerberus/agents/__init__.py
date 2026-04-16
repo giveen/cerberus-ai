@@ -46,10 +46,12 @@ where:
 
 # Standard library imports
 import importlib
+import logging
 import os
 import pkgutil
+import sys
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 try:
     from dotenv import load_dotenv  # pylint: disable=import-error # noqa: E501
@@ -74,20 +76,140 @@ except Exception:  # pragma: no cover - optional component
     transfer_to_flag_discriminator = None
 
 try:
-    from cerberus.sdk.agents import Agent
+    from .agent import Agent
 except Exception:  # pragma: no cover - optional dependency (e.g., openai not installed)
     Agent = None
 
 try:
-    from cerberus.sdk.agents.handoffs import handoff
+    from .handoffs import handoff
 except Exception:
     handoff = None
+
+from . import _config
+from .agent import ToolsToFinalOutputFunction, ToolsToFinalOutputResult
+from .agent_output import AgentOutputSchema
+from .computer import AsyncComputer, Button, Computer, Environment
+from .exceptions import (
+    AgentLoopError,
+    AgentsException,
+    InputGuardrailTripwireTriggered,
+    MaxTurnsExceeded,
+    ModelBehaviorError,
+    OutputGuardrailTripwireTriggered,
+    UserError,
+)
+from .guardrail import (
+    GuardrailFunctionOutput,
+    InputGuardrail,
+    InputGuardrailResult,
+    OutputGuardrail,
+    OutputGuardrailResult,
+    input_guardrail,
+    output_guardrail,
+)
+from .handoffs import Handoff, HandoffInputData, HandoffInputFilter
+from .items import (
+    HandoffCallItem,
+    HandoffOutputItem,
+    ItemHelpers,
+    MessageOutputItem,
+    ModelResponse,
+    ReasoningItem,
+    RunItem,
+    ToolCallItem,
+    ToolCallOutputItem,
+    TResponseInputItem,
+)
+from .lifecycle import AgentHooks, RunHooks
+from .model_settings import ModelSettings
+from .models.interface import Model, ModelProvider, ModelTracing
+from .models.openai_chatcompletions import OpenAIChatCompletionsModel
+from .models.openai_provider import OpenAIProvider
+from .models.openai_responses import OpenAIResponsesModel
+from .result import RunResult, RunResultStreaming
+from .run import RunConfig, Runner
+from .run_context import RunContextWrapper, TContext
+from .stream_events import (
+    AgentUpdatedStreamEvent,
+    RawResponsesStreamEvent,
+    RunItemStreamEvent,
+    StreamEvent,
+)
+from .tool import (
+    ComputerTool,
+    FileSearchTool,
+    FunctionTool,
+    FunctionToolResult,
+    Tool,
+    WebSearchTool,
+    default_tool_error_function,
+    function_tool,
+)
+from .tracing import (
+    AgentSpanData,
+    CustomSpanData,
+    FunctionSpanData,
+    GenerationSpanData,
+    GuardrailSpanData,
+    HandoffSpanData,
+    MCPListToolsSpanData,
+    Span,
+    SpanData,
+    SpanError,
+    SpeechGroupSpanData,
+    SpeechSpanData,
+    Trace,
+    TracingProcessor,
+    TranscriptionSpanData,
+    add_trace_processor,
+    agent_span,
+    custom_span,
+    function_span,
+    gen_span_id,
+    gen_trace_id,
+    generation_span,
+    get_current_span,
+    get_current_trace,
+    guardrail_span,
+    handoff_span,
+    mcp_tools_span,
+    set_trace_processors,
+    set_tracing_disabled,
+    set_tracing_export_api_key,
+    speech_group_span,
+    speech_span,
+    trace,
+    transcription_span,
+)
+from .usage import Usage
 
 # Extend the search path for namespace packages (allows merging)
 __path__ = pkgutil.extend_path(__path__, __name__)
 
 # Get model from environment or use default
 model = os.environ.get("CERBERUS_MODEL", "cerebro1")
+
+
+def set_default_openai_key(key: str, use_for_tracing: bool = True) -> None:
+    """Set the default OpenAI API key used for LLM requests."""
+    _config.set_default_openai_key(key, use_for_tracing)
+
+
+def set_default_openai_client(client: Any, use_for_tracing: bool = True) -> None:
+    """Set the default OpenAI client used for LLM requests."""
+    _config.set_default_openai_client(client, use_for_tracing)
+
+
+def set_default_openai_api(api: str) -> None:
+    """Set the default OpenAI API family to use for requests."""
+    _config.set_default_openai_api(api)
+
+
+def enable_verbose_stdout_logging() -> None:
+    """Enable verbose agent logging to stdout."""
+    logger = logging.getLogger("openai.agents")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(logging.StreamHandler(sys.stdout))
 
 
 PATTERNS = ["hierarchical", "swarm", "chain_of_thought", "auction_based", "recursive"]
@@ -188,7 +310,7 @@ def get_agent_module(agent_name: str) -> str:
 
     Returns:
         The full module name where the agent
-        is defined (e.g., 'cerberus.sdk.agents.basic')
+        is defined (e.g., 'cerberus.agents.basic')
     """
     # Try to import all agents from the agents folder
     for _, name, _ in pkgutil.iter_modules(__path__, __name__ + "."):

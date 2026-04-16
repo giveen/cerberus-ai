@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from inline_snapshot import snapshot
 
-from cerberus.sdk.agents.tracing import (
+from cerberus.agents.tracing import (
     Span,
     Trace,
     agent_span,
@@ -16,7 +16,7 @@ from cerberus.sdk.agents.tracing import (
     handoff_span,
     trace,
 )
-from cerberus.sdk.agents.tracing.spans import SpanError
+from cerberus.agents.tracing.spans import SpanError
 
 from tests.testing_processor import (
     SPAN_PROCESSOR_TESTING,

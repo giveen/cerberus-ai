@@ -10,7 +10,7 @@ for comprehensive security analysis.
 from cerberus.agents.red_teamer import redteam_agent
 from cerberus.agents.thought import thought_agent
 from cerberus.agents.mail import dns_smtp_agent
-from cerberus.sdk.agents import handoff
+from cerberus.agents import handoff
 
 
 # Clone agents to avoid modifying the original instances

@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from typing_extensions import TypedDict
 
-from cerberus.sdk.agents import (
+from cerberus.agents import (
     GuardrailFunctionOutput,
     Handoff,
     HandoffInputData,
@@ -19,11 +19,11 @@ from cerberus.sdk.agents import (
     UserError,
     handoff,
 )
-from cerberus.sdk.agents.agent import Agent
-from cerberus.sdk.agents.items import RunItem
-from cerberus.sdk.agents.run import RunConfig
-from cerberus.sdk.agents.stream_events import AgentUpdatedStreamEvent
-from cerberus.sdk.agents.tool import function_tool
+from cerberus.agents.agent import Agent
+from cerberus.agents.items import RunItem
+from cerberus.agents.run import RunConfig
+from cerberus.agents.stream_events import AgentUpdatedStreamEvent
+from cerberus.agents.tool import function_tool
 
 from tests.fake_model import FakeModel
 from tests.core.test_responses import (

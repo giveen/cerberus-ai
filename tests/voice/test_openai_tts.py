@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 try:
-    from cerberus.sdk.agents.voice import OpenAITTSModel, TTSModelSettings
+    from cerberus.agents.voice import OpenAITTSModel, TTSModelSettings
 except ImportError:
     pass
 

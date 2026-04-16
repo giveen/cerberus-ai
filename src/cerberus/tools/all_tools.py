@@ -34,8 +34,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel, Field, ValidationError
-from cerberus.sdk.planner.models import DependencyKind
-from cerberus.sdk.planner.validator import (
+from cerberus.planner.models import DependencyKind
+from cerberus.planner.validator import (
     UnresolvedDependencyError,
     validate_plan,
 )

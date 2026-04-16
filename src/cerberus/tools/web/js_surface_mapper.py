@@ -21,7 +21,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests  # type: ignore
 
-from cerberus.sdk.agents import function_tool
+from cerberus.agents import function_tool
 
 
 _FULL_URL_RE = re.compile(r"https?://[^\s\"'<>\\)]+")

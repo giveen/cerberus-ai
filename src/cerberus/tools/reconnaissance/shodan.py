@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from cerberus.memory.logic import clean_data
 from cerberus.repl.commands.config import get_env_var_value
 from cerberus.repl.ui.logging import get_cerberus_logger
-from cerberus.sdk.agents import function_tool
+from cerberus.agents import function_tool
 from cerberus.tools._lazy import LazyToolProxy
 from cerberus.tools.workspace import get_project_space
 

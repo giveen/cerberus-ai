@@ -193,7 +193,7 @@ class TopologyBuilder:
 
     def _collect_agent_histories(self) -> Dict[str, List[Dict[str, Any]]]:
         try:
-            from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
+            from cerberus.agents.simple_agent_manager import AGENT_MANAGER
 
             all_histories = AGENT_MANAGER.get_all_histories() or {}
         except Exception:
