@@ -1719,6 +1719,29 @@ class RunImpl:
                 )
                 continue
 
+            try:
+                invocation_kwargs = json.loads(effective_tool_call.arguments or "{}")
+                if not isinstance(invocation_kwargs, dict):
+                    invocation_kwargs = {"_non_object_arguments": str(invocation_kwargs)}
+            except Exception:
+                invocation_kwargs = {"_raw_arguments": str(effective_tool_call.arguments or "")[:1200]}
+
+            _RUNTIME_DEBUG_LOGGER.write(
+                channel="trace_debug",
+                message="runner_tool_invocation_kwargs",
+                payload={
+                    "tool_name": function_tool.name,
+                    "call_id": effective_tool_call.call_id,
+                    "kwargs": invocation_kwargs,
+                },
+            )
+            logger.debug(
+                "Invoking tool %s (call_id=%s) with kwargs=%s",
+                function_tool.name,
+                effective_tool_call.call_id,
+                invocation_kwargs,
+            )
+
             scheduled_tasks.append(
                 (
                     index,

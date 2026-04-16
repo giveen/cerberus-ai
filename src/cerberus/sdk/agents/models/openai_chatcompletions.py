@@ -616,8 +616,8 @@ def _coerce_tool_arguments_for_api(raw: Any, tool_name: str = "") -> str:
     """Return provider-safe function.arguments JSON.
 
     Chat-completions providers expect function.arguments to be a valid JSON
-    object string. If model output is malformed, coerce to a stable empty
-    object so replay/history does not fail the next model turn.
+    object string. If model output is malformed, preserve a recoverable
+    wrapper payload instead of silently falling back to {}.
     """
     if isinstance(raw, dict):
         return json.dumps(raw, ensure_ascii=True, separators=(",", ":"))
@@ -631,6 +631,29 @@ def _coerce_tool_arguments_for_api(raw: Any, tool_name: str = "") -> str:
     parsed = _parse_tool_args(candidate, tool_name=tool_name) if candidate else None
     if isinstance(parsed, dict):
         return json.dumps(parsed, ensure_ascii=True, separators=(",", ":"))
+
+    # Preserve plain streamed fragments (e.g. "arg1arg2") as-is. Wrapping
+    # these breaks incremental tool-call assembly semantics.
+    stripped_candidate = candidate.strip()
+    if stripped_candidate and not any(token in stripped_candidate for token in ("{", "}", ":", '"')):
+        return candidate
+
+    # Preserve malformed object-like payload context so runner-side validation
+    # can surface actionable retry guidance instead of silently dispatching {}.
+    if candidate:
+        wrapped = {
+            "_raw_arguments": candidate[:4000],
+            "_parse_error": "failed_to_parse_tool_arguments",
+        }
+        _RUNTIME_DEBUG_LOGGER.write(
+            channel="trace_debug",
+            message="tool_arguments_wrapped_after_parse_failure",
+            payload={
+                "tool_name": tool_name or "unknown_tool",
+                "preview": candidate[:200],
+            },
+        )
+        return json.dumps(wrapped, ensure_ascii=True, separators=(",", ":"))
 
     _RUNTIME_DEBUG_LOGGER.write(
         channel="trace_debug",

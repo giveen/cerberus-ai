@@ -183,6 +183,8 @@ class AgentSession(BaseModel):
     status_line: str = "Standing by for a prompt or command."
     prompt_stream_lines: list[str] = Field(default_factory=list)
     prompt_response_log_index: int | None = None
+    stream_log_index: int | None = None
+    stream_call_id: str = ""
     prompt_agent: str = "one_tool"
     execution_environment_id: str = ""
 
@@ -896,6 +898,59 @@ class AgentDashboardState(rx.State):
             session.prompt_response_log_index -= overflow
             if session.prompt_response_log_index < 0:
                 session.prompt_response_log_index = None
+        if session.stream_log_index is not None:
+            session.stream_log_index -= overflow
+            if session.stream_log_index < 0:
+                session.stream_log_index = None
+                session.stream_call_id = ""
+        self._store_session(index, session)
+
+    def _append_or_update_stream_log(
+        self,
+        index: int,
+        role: str,
+        token: str,
+        *,
+        call_id: str = "",
+    ) -> None:
+        cleaned = token.rstrip("\r\n")
+        if not cleaned:
+            return
+
+        session = self._session_copy(index)
+        current_call_id = call_id or session.stream_call_id or session.active_tool_name
+
+        # If we switched to a new call, start a fresh stream entry.
+        if session.stream_call_id and current_call_id and session.stream_call_id != current_call_id:
+            session.stream_log_index = None
+
+        if session.stream_log_index is not None and 0 <= session.stream_log_index < len(session.logs):
+            existing = dict(session.logs[session.stream_log_index])
+            existing_content = str(existing.get("content", "") or "")
+            existing["content"] = (
+                f"{existing_content}\n{cleaned}" if existing_content else cleaned
+            )
+            existing["timestamp"] = _timestamp()
+            logs = list(session.logs)
+            logs[session.stream_log_index] = existing
+            session.logs = logs
+        else:
+            logs = [*session.logs, _log_entry(role, cleaned)]
+            overflow = max(0, len(logs) - MAX_LOG_ENTRIES)
+            session.logs = logs[-MAX_LOG_ENTRIES:]
+            session.stream_log_index = len(session.logs) - 1
+            if session.prompt_response_log_index is not None:
+                session.prompt_response_log_index -= overflow
+                if session.prompt_response_log_index < 0:
+                    session.prompt_response_log_index = None
+
+        session.stream_call_id = current_call_id
+        self._store_session(index, session)
+
+    def _reset_stream_log(self, index: int) -> None:
+        session = self._session_copy(index)
+        session.stream_log_index = None
+        session.stream_call_id = ""
         self._store_session(index, session)
 
     def _capture_prompt_dispatch_output(self, index: int, message: str) -> None:
@@ -938,6 +993,8 @@ class AgentDashboardState(rx.State):
         session = self._session_copy(index)
         session.prompt_stream_lines = []
         session.prompt_response_log_index = None
+        session.stream_log_index = None
+        session.stream_call_id = ""
         self._store_session(index, session)
 
     @staticmethod
@@ -1321,6 +1378,8 @@ class AgentDashboardState(rx.State):
         session.status_line = "Running policy verification."
         session.prompt_stream_lines = []
         session.prompt_response_log_index = None
+        session.stream_log_index = None
+        session.stream_call_id = ""
         session.tier_status = {tier_key: "pending" for tier_key, _ in AUDIT_TIERS}
         session.logs = [
             *session.logs,
@@ -1333,6 +1392,7 @@ class AgentDashboardState(rx.State):
     async def _handle_runtime_event(self, index: int, event: dict[str, Any]) -> None:
         channel = str(event.get("channel", "stdout") or "stdout").strip().lower()
         message = str(event.get("message", "") or "").rstrip()
+        call_id = str(event.get("call_id", "") or "").strip()
         if not message:
             return
 
@@ -1353,7 +1413,10 @@ class AgentDashboardState(rx.State):
                 self._store_session(index, session)
             else:
                 role = self._role_for_runtime_event(channel, session.active_tool_name)
-            self._append_log(index, role, message)
+            if channel in {"stdout", "stderr"} and session.is_busy:
+                self._append_or_update_stream_log(index, role, message, call_id=call_id)
+            else:
+                self._append_log(index, role, message)
 
     async def _dispatch_verified_action(
         self,

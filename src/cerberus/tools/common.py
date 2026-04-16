@@ -404,8 +404,9 @@ async def execute_system_command(
         env=runtime_env,
         timeout_seconds=timeout_value,
         redactor=_redact,
-        stdout_mode="line",
-        stderr_mode="line",
+        # Chunk mode forwards partial stdout/stderr as soon as produced.
+        stdout_mode="chunk",
+        stderr_mode="chunk",
         started_callback=_started_callback,
         max_output_chars=200_000,
         max_line_chars=8_000,
