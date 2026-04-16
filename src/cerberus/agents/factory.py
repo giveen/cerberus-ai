@@ -26,6 +26,7 @@ from cerberus.sdk.agents import Agent, FunctionTool, OpenAIChatCompletionsModel,
 from cerberus.tools.all_tools import get_tool, get_tools_for_agent
 from cerberus.tools.reconnaissance.filesystem import PathGuard
 from cerberus.tools.workspace import get_project_space
+from cerberus.util.config import get_effective_api_base, get_effective_api_key, get_effective_model
 from cerberus.util import create_system_prompt_renderer, load_prompt_template
 
 try:
@@ -410,11 +411,9 @@ class CerebroAgentFactory:
             model_override
             or os.getenv(f"CERBERUS_{role.upper()}_MODEL")
             or os.getenv(f"CERBERUS_{role.upper()}_MODEL")
-            or os.getenv("CERBERUS_MODEL")
-            or os.getenv("CERBERUS_MODEL")
-            or "cerebro1"
+            or get_effective_model()
         )
-        api_key = os.getenv("OPENAI_API_KEY", "sk-placeholder-key-for-local-models")
+        api_key = get_effective_api_key(default="sk-placeholder-key-for-local-models")
 
         runtime_model = OpenAIChatCompletionsModel(
             model=model_name,
@@ -590,8 +589,8 @@ class CerebroAgentFactory:
 
         base_prompt = self._hydrate_prompt(fallback_role, runtime_metadata, _generic_template_agent())
         toolbox = self._build_toolbox(fallback_role, allow_subghz=False, extra_tools=None)
-        model_name = model_override or os.getenv("CERBERUS_MODEL", "cerebro1")
-        api_key = os.getenv("OPENAI_API_KEY", "sk-placeholder-key-for-local-models")
+        model_name = model_override or get_effective_model()
+        api_key = get_effective_api_key(default="sk-placeholder-key-for-local-models")
 
         generic_agent = Agent(
             name=custom_name or "Generic Intelligence Agent",
@@ -753,13 +752,16 @@ class CerebroAgentFactory:
 
 def _generic_template_agent() -> Agent:
     """Internal helper used exclusively for prompt hydration fallback path."""
+    model_name = get_effective_model()
+    api_key = get_effective_api_key(default="sk-placeholder-key-for-local-models")
+    api_base = get_effective_api_base()
     return Agent(
         name="Generic Intelligence Agent Template",
         instructions="You are a safe and capable cybersecurity assistant.",
         description="Template holder for failover hydration.",
         model=OpenAIChatCompletionsModel(
-            model=os.getenv("CERBERUS_MODEL", "cerebro1"),
-            openai_client=AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", "sk-placeholder-key-for-local-models")),
+            model=model_name,
+            openai_client=AsyncOpenAI(api_key=api_key, base_url=api_base),
             agent_name="Generic Intelligence Agent Template",
             agent_id="template",
             agent_type="generic_intelligence",

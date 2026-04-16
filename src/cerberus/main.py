@@ -52,8 +52,13 @@ from cerberus.sdk.agents.run_context import RunContextWrapper
 from cerberus.sdk.agents.tool import FunctionTool
 from cerberus.tools.all_tools import get_tool_registry
 from cerberus.tools.reconnaissance.filesystem import PathGuard
-from cerberus.utils.process_handler import streaming_runtime, terminate_session_task
-from cerberus.util.config import should_suppress_openai_api_key_warning
+from cerberus.utils.process_handler import run_streaming_subprocess, streaming_runtime, terminate_session_task
+from cerberus.util.config import (
+    get_effective_api_base,
+    get_effective_api_key,
+    get_effective_model,
+    should_suppress_openai_api_key_warning,
+)
 from cerberus.verification.policy_engine import PolicyEngine
 
 
@@ -63,6 +68,9 @@ _STATUS_REFRESH_SECONDS = 10.0
 _TRANSFER_PREFIX = "orchestrator.transfer.request."
 _PROMPT_DISPATCH_TOOL = "run_supervised_prompt"
 _PROMPT_DISPATCH_AGENT_ENV = "CERBERUS_DASHBOARD_PROMPT_AGENT"
+_PROMPT_DISPATCH_AGENT_LEGACY_ENV = "CEREBRO_DASHBOARD_PROMPT_AGENT"
+_PROMPT_DISPATCH_GLOBAL_AGENT_ENV = "CERBERUS_AGENT_TYPE"
+_PROMPT_DISPATCH_GLOBAL_AGENT_LEGACY_ENV = "CEREBRO_AGENT_TYPE"
 _PROMPT_DISPATCH_AGENT_FALLBACK = "assistant"
 
 
@@ -230,6 +238,19 @@ async def _emit_headless_log(log_emitter: Any, *, channel: str, message: str) ->
         await result
 
 
+def _resolve_prompt_dispatch_agent() -> str:
+    for env_key in (
+        _PROMPT_DISPATCH_AGENT_ENV,
+        _PROMPT_DISPATCH_AGENT_LEGACY_ENV,
+        _PROMPT_DISPATCH_GLOBAL_AGENT_ENV,
+        _PROMPT_DISPATCH_GLOBAL_AGENT_LEGACY_ENV,
+    ):
+        value = str(os.getenv(env_key, "") or "").strip()
+        if value:
+            return value
+    return _PROMPT_DISPATCH_AGENT_FALLBACK
+
+
 async def _invoke_streamable_tool(
     tool_name: str,
     arguments: dict[str, Any],
@@ -252,17 +273,23 @@ async def _invoke_streamable_tool(
         if workspaces_root is None:
             workspaces_root = resolve_headless_workspaces_root(project_root)
 
-        prompt_agent = (
-            str(os.getenv(_PROMPT_DISPATCH_AGENT_ENV, "") or "").strip()
-            or str(os.getenv("CEREBRO_DASHBOARD_PROMPT_AGENT", "") or "").strip()
-            or _PROMPT_DISPATCH_AGENT_FALLBACK
-        )
+        prompt_agent = _resolve_prompt_dispatch_agent()
 
         env = os.environ.copy()
+        active_container = str(env.get("CERBERUS_ACTIVE_CONTAINER") or env.get("CEREBRO_ACTIVE_CONTAINER") or "").strip()
         env.update(
             {
                 _PROMPT_DISPATCH_AGENT_ENV: prompt_agent,
                 "CERBERUS_AGENT_TYPE": prompt_agent,
+                "CERBERUS_MODEL": get_effective_model(
+                    default=str(env.get("CERBERUS_MODEL") or env.get("CEREBRO_MODEL") or "cerebro1")
+                ),
+                "CERBERUS_API_BASE": get_effective_api_base(
+                    default=str(env.get("CERBERUS_API_BASE") or env.get("CEREBRO_API_BASE") or "http://localhost:8000/v1")
+                ),
+                "CERBERUS_API_KEY": get_effective_api_key(
+                    default=str(env.get("CERBERUS_API_KEY") or env.get("CEREBRO_API_KEY") or "sk-cerberus-1234567890")
+                ),
                 "CERBERUS_WORKSPACE_ACTIVE_ROOT": str(project_root),
                 "CERBERUS_WORKSPACE_DIR": str(workspaces_root),
                 "CERBERUS_WORKSPACE": project_root.name,
@@ -270,45 +297,47 @@ async def _invoke_streamable_tool(
                 "CIR_WORKSPACE": str(project_root),
             }
         )
+        if active_container:
+            env["CERBERUS_ACTIVE_CONTAINER"] = active_container
 
-        process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-m",
-            "cerberus.cli",
-            "--workspace",
-            str(project_root),
-            "run",
-            prompt,
+        runner_python = "python3" if active_container else sys.executable
+        try:
+            timeout_seconds = max(30, int(os.getenv("CERBERUS_COMMAND_TIMEOUT_MAX", "3600")))
+        except Exception:
+            timeout_seconds = 3600
+
+        result = await run_streaming_subprocess(
+            argv=[
+                runner_python,
+                "-m",
+                "cerberus.cli",
+                "--workspace",
+                str(project_root),
+                "run",
+                prompt,
+            ],
             cwd=str(project_root),
             env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            timeout_seconds=timeout_seconds,
+            event_callback=lambda channel, message: _emit_headless_log(log_emitter, channel=channel, message=message),
+            session_id=session_id,
         )
 
-        stdout_lines: list[str] = []
-        stderr_lines: list[str] = []
+        combined_stdout = result.stdout.strip()
+        combined_stderr = result.stderr.strip()
+        exit_code = result.exit_code
 
-        async def _drain_stream(stream: Any, *, channel: str, bucket: list[str]) -> None:
-            if stream is None:
-                return
-            while True:
-                line = await stream.readline()
-                if not line:
-                    return
-                message = line.decode("utf-8", errors="replace").rstrip()
-                if not message:
-                    continue
-                bucket.append(message)
-                await _emit_headless_log(log_emitter, channel=channel, message=message)
-
-        await asyncio.gather(
-            _drain_stream(process.stdout, channel="stdout", bucket=stdout_lines),
-            _drain_stream(process.stderr, channel="stderr", bucket=stderr_lines),
-        )
-        exit_code = await process.wait()
-
-        combined_stdout = "\n".join(stdout_lines).strip()
-        combined_stderr = "\n".join(stderr_lines).strip()
+        if result.timed_out:
+            failure_message = combined_stderr or combined_stdout or "Supervised prompt runner timed out by policy."
+            return {
+                "ok": False,
+                "error": {"code": "prompt_dispatch_timeout", "message": failure_message},
+                "output": {
+                    "stdout": combined_stdout,
+                    "stderr": combined_stderr,
+                    "exit_code": exit_code,
+                },
+            }, True
 
         if exit_code != 0:
             failure_message = combined_stderr or combined_stdout or f"Supervised prompt runner exited with code {exit_code}."

@@ -1,9 +1,6 @@
-"""
-This module contains tests for the one-tool agent functionality, specifically
-for the CTF agent. It includes tests to verify the agent's instructions and 
-configuration, as well as its ability to execute a Linux command using the 
-generic_linux_command tool.
-"""
+"""Tests for the one-tool CTF agent."""
+
+import cerberus.agents.one_tool as one_tool_module
 
 import pytest
 from tests.fake_model import FakeModel
@@ -13,8 +10,8 @@ from tests.core.test_responses import (
     get_function_tool,
 )
 from cerberus.sdk.agents import Runner
-from cerberus.agents.one_tool import transfer_to_one_tool_agent  
-from cerberus.agents.one_tool import one_tool_agent  
+from cerberus.agents.one_tool import transfer_to_one_tool_agent
+from cerberus.agents.one_tool import one_tool_agent
 
 @pytest.mark.asyncio
 async def test_ctf_agent_instructions_and_configuration():
@@ -29,6 +26,20 @@ async def test_ctf_agent_instructions_and_configuration():
     
     # Verify the agent's name
     assert agent.name == "CTF agent"
+
+
+def test_ctf_agent_uses_effective_runtime_env(monkeypatch) -> None:
+    monkeypatch.delenv("CERBERUS_MODEL", raising=False)
+    monkeypatch.delenv("CERBERUS_API_BASE", raising=False)
+    monkeypatch.delenv("CERBERUS_API_KEY", raising=False)
+    monkeypatch.setenv("CEREBRO_MODEL", "Qwen3.5-27B-Aggressive-Q4_K_M")
+    monkeypatch.setenv("CEREBRO_API_BASE", "http://legacy.example/v1")
+    monkeypatch.setenv("CEREBRO_API_KEY", "sk-legacy")
+
+    agent = one_tool_module._build_one_tool_agent()
+
+    assert agent.model.model == "Qwen3.5-27B-Aggressive-Q4_K_M"
+    assert str(agent.model._client.base_url).startswith("http://legacy.example/v1")
 
 @pytest.mark.asyncio
 async def test_ctf_agent_executes_linux_command():

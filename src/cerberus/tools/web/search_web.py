@@ -1,106 +1,139 @@
 import os
 import re
-from openai import OpenAI
-from dotenv import load_dotenv
+from typing import Any
 
-from cerberus.tools.web.google_search import (
-    google_dork_search, 
-    google_search
-)
+import requests
+
 from cerberus.sdk.agents import function_tool
-from cerberus.agents.guardrails import sanitize_external_content
+
+
+_DEFAULT_SEARXNG_BASE_URL = "http://searxng:8080"
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+_ARTICLE_RE = re.compile(r"<article class=\"result[^>]*>(.*?)</article>", re.DOTALL | re.IGNORECASE)
+_H3_LINK_RE = re.compile(r"<h3>\s*<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>\s*</h3>", re.DOTALL | re.IGNORECASE)
+_CONTENT_RE = re.compile(r"<p class=\"content\">(.*?)</p>", re.DOTALL | re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+_SPACE_RE = re.compile(r"\s+")
+
+
+def _sanitize_external_content(raw: str) -> str:
+    text = str(raw or "")
+    text = _CONTROL_CHAR_RE.sub("", text)
+    return text.strip()
+
+
+def _strip_html(raw: str) -> str:
+    cleaned = _TAG_RE.sub(" ", raw or "")
+    cleaned = _SPACE_RE.sub(" ", cleaned)
+    return cleaned.strip()
+
+
+def _extract_results_from_html(html_text: str, max_results: int) -> str:
+    matches = _ARTICLE_RE.findall(html_text or "")
+    if not matches:
+        return "No web results found."
+
+    lines: list[str] = ["SearXNG Search Results:"]
+    count = 0
+    for block in matches:
+        h3_match = _H3_LINK_RE.search(block)
+        if not h3_match:
+            continue
+
+        url = (h3_match.group(1) or "").strip()
+        title = _strip_html(h3_match.group(2)) or "Untitled"
+        snippet_match = _CONTENT_RE.search(block)
+        snippet = _strip_html(snippet_match.group(1)) if snippet_match else ""
+
+        count += 1
+        lines.append(f"{count}. {title}")
+        if url:
+            lines.append(f"   URL: {url}")
+        if snippet:
+            lines.append(f"   Snippet: {snippet}")
+        if count >= max_results:
+            break
+
+    if count == 0:
+        return "No web results found."
+    return _sanitize_external_content("\n".join(lines))
+
+
+def _resolve_searxng_base_url() -> str:
+    raw = os.getenv("SEARXNG_BASE_URL", _DEFAULT_SEARXNG_BASE_URL).strip()
+    if not raw:
+        return _DEFAULT_SEARXNG_BASE_URL
+    return raw.rstrip("/")
+
+
+def _compose_query(query: str, context: str) -> str:
+    query_text = (query or "").strip()
+    context_text = (context or "").strip()
+    if not context_text:
+        return query_text
+    if not query_text:
+        return context_text
+    # Keep context searchable while preserving direct query intent.
+    return f"{query_text} {context_text}"
+
+
+def _perform_searxng_search(
+    *,
+    query: str,
+    context: str = "",
+    max_results: int = 8,
+    categories: str = "general",
+    language: str = "en-US",
+    time_range: str = "",
+) -> str:
+    normalized_query = _compose_query(query, context)
+    if not normalized_query:
+        return "Error: query is required."
+
+    base_url = _resolve_searxng_base_url()
+    endpoint = f"{base_url}/"
+    limit = max(1, min(int(max_results), 20))
+    params: dict[str, Any] = {
+        "q": normalized_query,
+        "safesearch": 0,
+        "language": language,
+        "categories": categories,
+        "pageno": 1,
+    }
+    if time_range:
+        params["time_range"] = time_range
+
+    try:
+        response = requests.get(endpoint, params=params, timeout=20, allow_redirects=True)
+        response.raise_for_status()
+        payload = response.text
+    except Exception as exc:
+        return f"Error querying SearXNG: {exc}"
+
+    return _extract_results_from_html(payload, limit)
 
 
 @function_tool
-def query_perplexity(query: str = "", context: str = "") -> str:
-    """
-    Query the Perplexity AI API with a user prompt.
-
-    Args:
-        query (str): The question to search for.
-        context (str): The full context of current CTF challenge.
-
-    Returns:
-        str: The response from Perplexity AI.
-    """
-    load_dotenv()
-    api_key = os.getenv("PERPLEXITY_API_KEY")
-
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are an expert cybersecurity researcher specializing in CTF "
-                "competitions. Your role is to search for and provide precise, "
-                "actionable intelligence to your pentesting team. Focus on "
-                "delivering technical details, exploitation techniques, and "
-                "vulnerability information relevant to the search query. Include "
-                "specific commands, payloads, or tools that would help the team "
-                "progress in their CTF challenge. Prioritize accuracy and depth "
-                "over general explanations. Your team relies on your research to "
-                "identify attack vectors, bypass security controls, and capture "
-                "flags. Always suggest concrete next steps based on your findings."
-                "Put the necessary code in each iteration"
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"You should search the following terms: {query} and the full "
-                f"context of current CTF challenge: {context}"
-            ),
-        },
-    ]
-
-    client = OpenAI(api_key=api_key, base_url="https://api.perplexity.ai")
-
-    response = client.chat.completions.create(
-        model="sonar-pro",
-        messages=messages,
+def searxng_web_search(
+    query: str,
+    context: str = "",
+    max_results: int = 8,
+    categories: str = "general",
+    language: str = "en-US",
+    time_range: str = "",
+) -> str:
+    """Search the web via the local SearXNG instance."""
+    return _perform_searxng_search(
+        query=query,
+        context=context,
+        max_results=max_results,
+        categories=categories,
+        language=language,
+        time_range=time_range,
     )
-    
-    # Sanitize the response as it comes from external source
-    content = response.choices[0].message.content
-    return sanitize_external_content(content)
+
 
 @function_tool
 def make_web_search_with_explanation(context: str = "", query: str = "") -> str:
-    """
-    Executes an intelligent web search via the AI service for relevant
-    cybersecurity and CTF-related information. This function sends the
-    provided query to the internet search engine and returns the response.
-    It also uses the full context of the current CTF challenge.
-
-    CONTEXT ALWAYS IS NEEDED
-    Args:
-      context (str): The full context of the current CTF challenge.
-        query (str): The question or keywords to search for.
-      
-
-    Returns:
-        str: Search result.
-    """
-    return query_perplexity(query, context)
-
-@function_tool
-def make_google_search(query: str, dorks = False) -> str:
-    """
-    Search Google for information.
-    
-    Args:
-        query: The search query to look up on Google.
-        dorks: Whether to use Google dorks for advanced searching.
-            Default is False.
-            
-    Returns:
-        A list of search results. Each result contains URL, title, and snippet.
-    """
-    if dorks:
-        result = google_dork_search(query)
-    else:
-        result = google_search(query)
-    
-    # Sanitize search results as they come from external sources
-    if isinstance(result, str):
-        return sanitize_external_content(result)
-    return result
+    """Compatibility wrapper that routes web search to SearXNG."""
+    return _perform_searxng_search(query=query, context=context)

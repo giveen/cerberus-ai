@@ -37,6 +37,7 @@ dependencies = [
     "PyYAML",
     "tiktoken",
     "dnspython",
+    "docker>=7, <8",
     "flask",
     "networkx",
     "PyPDF2",

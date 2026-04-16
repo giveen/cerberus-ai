@@ -43,7 +43,7 @@ from cerberus.sdk.agents.agent_output import AgentOutputSchema
 from cerberus.sdk.agents.exceptions import UserError
 from cerberus.sdk.agents.items import TResponseInputItem
 from cerberus.sdk.agents.models.fake_id import FAKE_RESPONSES_ID
-from cerberus.sdk.agents.models.openai_chatcompletions import _Converter
+from cerberus.sdk.agents.models.openai_chatcompletions import _Converter, _parse_tool_args
 
 
 @pytest.fixture
@@ -86,6 +86,16 @@ def test_message_to_output_items_with_refusal(converter):
     refusal_part = cast(ResponseOutputRefusal, message_item.content[0])
     assert refusal_part.type == "refusal"
     assert refusal_part.refusal == "I'm sorry"
+
+
+def test_parse_tool_args_returns_dict_for_valid_json() -> None:
+    parsed = _parse_tool_args('{"target":"192.168.0.4","args":"-p 80"}', "nmap")
+    assert parsed == {"target": "192.168.0.4", "args": "-p 80"}
+
+
+def test_parse_tool_args_returns_none_for_invalid_json_instead_of_empty_dict() -> None:
+    parsed = _parse_tool_args("COMMITTING_JSON: {target: 192.168.0.4}", "nmap")
+    assert parsed is None
 
 
 def test_message_to_output_items_with_tool_call(converter):

@@ -32,7 +32,7 @@ async def test_litellm_bad_request_logs_sanitized_audit(monkeypatch):
 
     import cerberus.repl.ui.logging as logging_module
 
-    monkeypatch.setattr(logging_module, "get_cerebro_logger", _fake_logger)
+    monkeypatch.setattr(logging_module, "get_cerberus_logger", _fake_logger)
 
     model = occ.OpenAIChatCompletionsModel(
         model="openai/gpt-4o-mini",

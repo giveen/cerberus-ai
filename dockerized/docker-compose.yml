@@ -10,15 +10,20 @@ services:
       - ./.env/dashboard.env
     environment:
       PYTHONUNBUFFERED: "1"
+      SEARXNG_BASE_URL: "http://searxng:8080"
     volumes:
       - ./volumes/workspaces:/workspace/workspaces
       - ./volumes/logs:/workspace/logs
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8000:8000"
       - "8001:8001"
     depends_on:
       redis:
         condition: service_healthy
+      searxng:
+        condition: service_started
+    stop_grace_period: 30s
     restart: unless-stopped
 
   cerberus:
@@ -32,6 +37,8 @@ services:
     env_file:
       - ../.env
       - ./.env/runtime.env
+    environment:
+      SEARXNG_BASE_URL: "http://127.0.0.1:18080"
     volumes:
       - ./config:/config:ro
       - ./volumes/workspaces:/workspace/workspaces
@@ -50,6 +57,9 @@ services:
         condition: service_started
       qdrant:
         condition: service_started
+      searxng:
+        condition: service_started
+    stop_grace_period: 45s
     restart: unless-stopped
 
   redis:
@@ -64,6 +74,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    stop_grace_period: 60s
     restart: unless-stopped
 
   qdrant:
@@ -76,4 +87,30 @@ services:
       - "6334:6334"
     volumes:
       - ./volumes/qdrant:/qdrant/storage
+    stop_grace_period: 45s
+    restart: unless-stopped
+
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: cerberus-searxng
+    env_file:
+      - ./.env/searxng.env
+    ports:
+      - "18080:8080"
+    volumes:
+      - ./searxng/core-config:/etc/searxng
+      - ./volumes/searxng-cache:/var/cache/searxng
+    depends_on:
+      valkey:
+        condition: service_started
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  valkey:
+    image: docker.io/valkey/valkey:9-alpine
+    container_name: cerberus-searxng-valkey
+    command: valkey-server --save 30 1 --loglevel warning
+    volumes:
+      - ./volumes/searxng-valkey:/data
+    stop_grace_period: 30s
     restart: unless-stopped

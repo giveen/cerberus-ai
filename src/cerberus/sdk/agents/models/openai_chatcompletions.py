@@ -108,7 +108,11 @@ from cerberus.util import (
     safe_duration_to_float,
     update_agent_streaming_content,
 )
-from cerberus.util.config import get_effective_api_base, get_effective_api_key
+from cerberus.util.config import (
+    get_effective_api_base,
+    get_effective_api_key,
+    has_explicit_api_base_config,
+)
 
 # ---------------------------------------------------------------------------
 # LLM output sanitiser – strips hallucinated markup from local/small models
@@ -225,28 +229,29 @@ def _sanitize_llm_tool_args(raw: str | None) -> str:
     return cleaned
 
 
-def _parse_tool_args(raw: str | None, tool_name: str = "") -> dict:
-    """Parse tool-call arguments with a layered fallback strategy.
+def _parse_tool_args(raw: str | None, tool_name: str = "") -> dict[str, Any] | None:
+    """Parse tool-call arguments conservatively.
 
-    1. Sanitise then json.loads.
-    2. If that fails, try to extract the 'command' value via regex and
-       return {'command': <value>} so the tool can still execute.
-    3. If all else fails, return {}.
+    Returns a parsed dict when valid JSON is present. On parse failure,
+    return None and preserve the original argument string upstream rather than
+    silently coercing to an empty dict.
     """
     import json as _json
+
     cleaned = _sanitize_llm_tool_args(raw)
     try:
         parsed = _json.loads(cleaned)
-        if isinstance(parsed, dict):
-            return parsed
-        return {}
+        return parsed if isinstance(parsed, dict) else None
     except _json.JSONDecodeError:
-        pass
-    # Regex fallback: pull out "command": "..." or "command": '...'
-    m = _re.search(r'["\']command["\']\s*:\s*["\']([^"\']+)["\']', cleaned)
-    if m:
-        return {"command": m.group(1)}
-    return {}
+        try:
+            parsed = parse_json_lenient(cleaned, prefer_last=True)
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            if _debug.DONT_LOG_TOOL_DATA:
+                logger.debug("Failed to parse tool arguments for %s", tool_name or "unknown_tool")
+            else:
+                logger.debug("Failed to parse tool arguments: %s", cleaned)
+            return None
     prompt_tokens: int
     """The number of prompt tokens."""
     cached_tokens: int = 0
@@ -341,7 +346,7 @@ def _normalize_litellm_routing_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         has_provider_prefix = True
 
     needs_local_openai = (
-        bool(os.getenv("CERBERUS_API_BASE"))
+        has_explicit_api_base_config()
         or _is_local_or_custom_api_base(api_base_value)
         or _is_local_or_custom_api_base(configured_base)
         or (model_value.lower().startswith("openai/") and not has_custom_provider)
@@ -1112,7 +1117,7 @@ class OpenAIChatCompletionsModel(Model):
                         try:
                             # Handle empty/malformed arguments robustly
                             tool_args = tool_call.function.arguments
-                            args = _parse_tool_args(tool_args, tool_call.function.name)
+                            args = _parse_tool_args(tool_args, tool_call.function.name) or {}
                             # Check if this is a regular command (not a session command)
                             if (
                                 isinstance(args, dict)
@@ -2302,11 +2307,15 @@ class OpenAIChatCompletionsModel(Model):
                 # Actually send events for the function calls
                 for function_call in state.function_calls.values():
                     parsed_args = _parse_tool_args(function_call.arguments, function_call.name)
-                    function_call.arguments = json.dumps(
-                        parsed_args,
-                        ensure_ascii=True,
-                        separators=(",", ":"),
-                    )
+                    if parsed_args is not None:
+                        function_call.arguments = json.dumps(
+                            parsed_args,
+                            ensure_ascii=True,
+                            separators=(",", ":"),
+                        )
+                    else:
+                        # Preserve original sanitized arguments instead of overwriting with {}.
+                        function_call.arguments = _sanitize_llm_tool_args(function_call.arguments)
 
                     # Print a single clean tool execution line only after args are finalized.
                     final_tool_args = _sanitize_llm_tool_args(function_call.arguments)
@@ -3805,7 +3814,7 @@ class OpenAIChatCompletionsModel(Model):
                 logger.exception("LiteLLM request error audit fallback: %s", exc)
 
         def _compute_local_not_found_fallback(api_base: str | None) -> str | None:
-            if os.getenv("CERBERUS_API_BASE"):
+            if has_explicit_api_base_config():
                 return None
             try:
                 from urllib.parse import urlparse, urlunparse
@@ -3892,8 +3901,9 @@ class OpenAIChatCompletionsModel(Model):
         except LiteLLMNotFoundError as exc:
             _audit_litellm_request_error(exc, "not_found")
             raise UserError(
-                "LLM endpoint returned 404. Set CERBERUS_API_BASE to your active local endpoint "
-                "(for example http://localhost:8080/v1)."
+                "LLM endpoint returned 404. Point CERBERUS_API_BASE, CEREBRO_API_BASE, or "
+                "LOCAL_API_BASE at your active OpenAI-compatible endpoint. The Reflex backend "
+                "on :8001 is not an LLM API."
             ) from exc
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, asyncio.TimeoutError, ConnectionError) as exc:
             _audit_connection_failure(exc)
@@ -4261,8 +4271,8 @@ class OpenAIChatCompletionsModel(Model):
     def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
             # Determine API key
-            api_key = os.getenv("CERBERUS_API_KEY", os.getenv("OPENAI_API_KEY", "sk-cerebro-1234567890"))
-            base_url = os.getenv("CERBERUS_API_BASE", "http://localhost:8000/v1")
+            api_key = get_effective_api_key(default="sk-cerebro-1234567890")
+            base_url = get_effective_api_base(default="http://localhost:8000/v1")
             self._client = AsyncOpenAI(
                 api_key=api_key,
                 base_url=base_url,

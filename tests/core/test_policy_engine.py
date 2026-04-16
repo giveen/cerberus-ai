@@ -83,6 +83,9 @@ def test_verify_blocks_sibling_workspace_access(tmp_path):
 def test_verify_blocks_missing_binary_dependency(monkeypatch, tmp_path):
     engine = PolicyEngine(workspace_dir=str(tmp_path), project_id="eng-1")
 
+    monkeypatch.delenv("CERBERUS_ACTIVE_CONTAINER", raising=False)
+    monkeypatch.delenv("CEREBRO_ACTIVE_CONTAINER", raising=False)
+
     def _which(name: str) -> str | None:
         if name == "sqlmap":
             return None
@@ -100,6 +103,23 @@ def test_verify_blocks_missing_binary_dependency(monkeypatch, tmp_path):
 
     assert report.blocked is True
     assert any(f.code == "missing_dependency" for f in report.findings)
+
+
+def test_verify_skips_local_binary_check_when_active_container_is_configured(monkeypatch, tmp_path):
+    engine = PolicyEngine(workspace_dir=str(tmp_path), project_id="eng-1")
+
+    monkeypatch.setenv("CEREBRO_ACTIVE_CONTAINER", "cerberus")
+    monkeypatch.setattr("cerberus.verification.policy_engine.shutil.which", lambda _name: None)
+
+    report = engine.verify(
+        {
+            "tool_name": "execute_cli_command",
+            "arguments": {"command": "nmap --version"},
+            "available_tools": ["execute_cli_command"],
+        }
+    )
+
+    assert not any(f.code == "missing_dependency" for f in report.findings)
 
 
 def test_post_audit_ignores_malformed_raw_args_for_generic_tool(tmp_path):

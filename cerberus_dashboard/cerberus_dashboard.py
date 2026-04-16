@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import re
 import shlex
 import shutil
 from datetime import datetime
@@ -9,6 +10,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 import reflex as rx
+from reflex.event import noop
+from reflex.components.base.error_boundary import error_boundary
+from reflex.vars.base import Var
 
 from cerberus.main import execute_headless_action, terminate_action
 from cerberus.parsers import parse_json_lenient
@@ -18,6 +22,7 @@ from cerberus.verification.policy_engine import PolicyEngine, PolicyReport
 MAX_SESSIONS = 4
 MAX_LOG_ENTRIES = 60
 POLICY_HISTORY_LIMIT = 10
+PROMPT_STREAM_LINE_LIMIT = 400
 NEON_GREEN = "#00FF00"
 NEON_CYAN = "#00FFFF"
 BG_BLACK = "#000000"
@@ -35,6 +40,29 @@ SESSION_ROLES = [
 ]
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROMPT_DISPATCH_TOOL = "run_supervised_prompt"
+PROMPT_RESPONSE_MARKER = "final output"
+PROMPT_META_MARKERS = (
+    "technical safety constraints",
+    "audit reasoning",
+    "reasoning cycle recorded",
+    "mode_critique",
+    "mode mode_critique",
+    "pivot_required",
+    "cerebro supervised mission summary",
+    "cerebro prompt redactions",
+)
+PROMPT_HIDDEN_RESPONSE_MARKERS = (
+    "committing_json:",
+    "# session metadata",
+    "role: validate and critique proposed actions. do not execute.",
+    "policy engine found issues in the current plan",
+    "[system][reflect]",
+)
+STATE_SNAPSHOT_VERSION = 1
+STATE_SNAPSHOT_STORAGE_KEY = "cerberus_dashboard_snapshot_v1"
+ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+BOX_DRAWING_CHARS = set("+-=|│║─━═┌┐└┘├┤┬┴┼╭╮╰╯╔╗╚╝╠╣╦╩╬")
+PANEL_EDGE_CHARS = {"|", "│", "║"}
 KNOWN_COMMAND_TOKENS = {
     "bash",
     "cat",
@@ -139,6 +167,8 @@ class AgentSession(BaseModel):
     last_command: str = ""
     active_tool_name: str = ""
     status_line: str = "Standing by for a prompt or command."
+    prompt_stream_lines: list[str] = Field(default_factory=list)
+    prompt_response_log_index: int | None = None
 
 
 def _new_session(index: int) -> AgentSession:
@@ -170,6 +200,226 @@ def _next_session_slot(sessions: list[AgentSession]) -> int | None:
     return None
 
 
+def _strip_ansi(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text or "")
+
+
+def _contains_box_drawing(text: str) -> bool:
+    return any(character in BOX_DRAWING_CHARS for character in text)
+
+
+def _is_box_border_line(text: str) -> bool:
+    stripped = _strip_ansi(text).strip()
+    if not stripped:
+        return False
+    return all(character in BOX_DRAWING_CHARS or character.isspace() for character in stripped)
+
+
+def _extract_panel_content(text: str) -> str | None:
+    stripped = _strip_ansi(text).strip()
+    if len(stripped) < 2:
+        return None
+    if stripped[0] not in PANEL_EDGE_CHARS or stripped[-1] not in PANEL_EDGE_CHARS:
+        return None
+    inner = stripped[1:-1]
+    if inner.startswith(" "):
+        inner = inner[1:]
+    if inner.endswith(" "):
+        inner = inner[:-1]
+    return inner.rstrip()
+
+
+def _join_prompt_response_lines(lines: list[str]) -> str:
+    normalized = [line.rstrip() for line in lines]
+    while normalized and not normalized[0].strip():
+        normalized.pop(0)
+    while normalized and not normalized[-1].strip():
+        normalized.pop()
+
+    collapsed: list[str] = []
+    previous_blank = False
+    for line in normalized:
+        if not line.strip():
+            if not previous_blank:
+                collapsed.append("")
+            previous_blank = True
+            continue
+        collapsed.append(line)
+        previous_blank = False
+    return "\n".join(collapsed).strip()
+
+
+def _looks_like_model_request_payload(text: str) -> bool:
+    try:
+        parsed = parse_json_lenient(text, prefer_last=True)
+    except Exception:
+        return False
+
+    if not isinstance(parsed, dict):
+        return False
+    return isinstance(parsed.get("messages"), list) and isinstance(parsed.get("model"), str)
+
+
+def _sanitize_prompt_response_text(text: str) -> str:
+    cleaned = _join_prompt_response_lines(text.splitlines())
+    if not cleaned:
+        return ""
+
+    lowered = cleaned.lower()
+    if any(marker in lowered for marker in PROMPT_HIDDEN_RESPONSE_MARKERS):
+        return ""
+    if lowered.startswith("reasoning"):
+        return ""
+    if _looks_like_model_request_payload(cleaned):
+        return ""
+    return cleaned
+
+
+def _extract_prompt_response_from_lines(
+    raw_lines: list[str],
+    *,
+    fallback_to_plain_text: bool = False,
+) -> str:
+    captured_lines: list[str] = []
+    saw_final_output = False
+
+    for raw_line in raw_lines:
+        cleaned = _strip_ansi(raw_line).rstrip("\r\n")
+        stripped = cleaned.strip()
+
+        if not stripped:
+            if saw_final_output and captured_lines:
+                captured_lines.append("")
+            continue
+
+        if PROMPT_RESPONSE_MARKER in stripped.lower():
+            saw_final_output = True
+            continue
+
+        if not saw_final_output:
+            continue
+
+        panel_content = _extract_panel_content(cleaned)
+        if panel_content is not None:
+            captured_lines.append(panel_content)
+            continue
+
+        if _is_box_border_line(stripped):
+            if captured_lines:
+                break
+            continue
+
+        captured_lines.append(stripped)
+
+    extracted = _join_prompt_response_lines(captured_lines)
+    if extracted:
+        return _sanitize_prompt_response_text(extracted)
+
+    if not fallback_to_plain_text:
+        return ""
+
+    cleaned_lines = [_strip_ansi(line).rstrip("\r\n") for line in raw_lines]
+    if any(marker in line.strip().lower() for line in cleaned_lines for marker in PROMPT_META_MARKERS):
+        return ""
+    if any(_contains_box_drawing(line) for line in cleaned_lines):
+        return ""
+
+    return _sanitize_prompt_response_text(_join_prompt_response_lines([line.strip() for line in cleaned_lines]))
+
+
+def _upsert_assistant_response_log(
+    logs: list[dict[str, str]],
+    response_index: int | None,
+    content: str,
+) -> tuple[list[dict[str, str]], int]:
+    updated_logs = [dict(entry) for entry in logs]
+    if response_index is not None and 0 <= response_index < len(updated_logs):
+        existing = updated_logs[response_index]
+        if existing.get("role") == "Assistant":
+            updated_logs[response_index] = {**existing, "content": content}
+            return updated_logs, response_index
+
+    updated_logs.append(_log_entry("Assistant", content))
+    overflow = max(0, len(updated_logs) - MAX_LOG_ENTRIES)
+    if overflow:
+        updated_logs = updated_logs[overflow:]
+    return updated_logs, len(updated_logs) - 1
+
+
+def _serialize_dashboard_snapshot(
+    sessions: list[AgentSession],
+    *,
+    active_session_id: str,
+    cpu_usage: int,
+    ram_usage: int,
+    net_mbps: float,
+    alert_count: int,
+    sensor_health: str,
+) -> str:
+    payload = {
+        "version": STATE_SNAPSHOT_VERSION,
+        "active_session_id": active_session_id,
+        "cpu_usage": int(cpu_usage),
+        "ram_usage": int(ram_usage),
+        "net_mbps": float(net_mbps),
+        "alert_count": int(alert_count),
+        "sensor_health": str(sensor_health),
+        "agent_sessions": [session.model_dump(mode="json") for session in sessions],
+    }
+    return json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+
+
+def _deserialize_dashboard_snapshot(payload: str) -> dict[str, Any] | None:
+    text = str(payload or "").strip()
+    if not text:
+        return None
+
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return None
+
+    if not isinstance(parsed, dict):
+        return None
+    if int(parsed.get("version", -1)) != STATE_SNAPSHOT_VERSION:
+        return None
+
+    raw_sessions = parsed.get("agent_sessions")
+    if not isinstance(raw_sessions, list):
+        return None
+
+    restored_sessions: list[AgentSession] = []
+    seen_session_ids: set[str] = set()
+    for raw_session in raw_sessions[:MAX_SESSIONS]:
+        if not isinstance(raw_session, dict):
+            continue
+        try:
+            session = AgentSession.model_validate(raw_session)
+        except Exception:
+            continue
+        if session.session_id in seen_session_ids:
+            continue
+        seen_session_ids.add(session.session_id)
+        restored_sessions.append(session)
+
+    if not restored_sessions:
+        return None
+
+    restored_active = str(parsed.get("active_session_id", "") or "")
+    if restored_active not in {session.session_id for session in restored_sessions}:
+        restored_active = restored_sessions[0].session_id
+
+    return {
+        "agent_sessions": restored_sessions,
+        "active_session_id": restored_active,
+        "cpu_usage": int(parsed.get("cpu_usage", 24)),
+        "ram_usage": int(parsed.get("ram_usage", 58)),
+        "net_mbps": float(parsed.get("net_mbps", 8.4)),
+        "alert_count": int(parsed.get("alert_count", 1)),
+        "sensor_health": str(parsed.get("sensor_health", "Nominal") or "Nominal"),
+    }
+
+
 custom_css: dict[str, Any] = {
     "html, body": {
         "background": BG_BLACK,
@@ -195,7 +445,7 @@ custom_css: dict[str, Any] = {
         "background": "rgba(0, 24, 24, 0.76)",
     },
     ".terminal-flicker": {
-        "animation": "terminalFlicker 4s linear infinite",
+        "animation": "none",
     },
     ".terminal-flicker::-webkit-scrollbar": {
         "width": "8px",
@@ -207,6 +457,98 @@ custom_css: dict[str, Any] = {
     ".command-bar": {
         "background": "rgba(0, 0, 0, 0.92)",
         "backdrop-filter": "blur(14px)",
+    },
+    ".response-card": {
+        "background": "linear-gradient(180deg, rgba(8, 22, 20, 0.96) 0%, rgba(5, 14, 13, 0.94) 100%)",
+        "border": "1px solid rgba(0, 255, 255, 0.18)",
+        "border-radius": "18px",
+        "box-shadow": "0 18px 40px rgba(0, 0, 0, 0.34)",
+        "padding": "20px 22px",
+    },
+    ".user-card": {
+        "background": "linear-gradient(180deg, rgba(12, 22, 12, 0.96) 0%, rgba(6, 14, 6, 0.94) 100%)",
+        "border": "1px solid rgba(0, 255, 0, 0.2)",
+        "border-radius": "18px",
+        "box-shadow": "0 18px 40px rgba(0, 0, 0, 0.34)",
+        "padding": "20px 22px",
+    },
+    ".response-markdown": {
+        "color": TEXT_PRIMARY,
+        "font-family": '"IBM Plex Sans", "Segoe UI", sans-serif',
+        "font-size": "1rem",
+        "line-height": "1.75",
+    },
+    ".response-markdown > :first-child": {
+        "margin-top": "0",
+    },
+    ".response-markdown > :last-child": {
+        "margin-bottom": "0",
+    },
+    ".response-markdown p": {
+        "margin": "0 0 1rem 0",
+    },
+    ".response-markdown h1, .response-markdown h2, .response-markdown h3, .response-markdown h4": {
+        "color": "#EFFFF9",
+        "font-family": '"IBM Plex Sans", "Segoe UI", sans-serif',
+        "font-weight": "700",
+        "line-height": "1.2",
+        "margin": "1.25rem 0 0.75rem 0",
+    },
+    ".response-markdown ul, .response-markdown ol": {
+        "margin": "0.75rem 0 1rem 1.25rem",
+        "padding": "0",
+    },
+    ".response-markdown li": {
+        "margin": "0.35rem 0",
+    },
+    ".response-markdown a": {
+        "color": "#7CF7FF",
+        "text-decoration": "underline",
+    },
+    ".response-markdown blockquote": {
+        "margin": "1rem 0",
+        "padding": "0.75rem 1rem",
+        "border-left": "3px solid rgba(0, 255, 255, 0.35)",
+        "background": "rgba(0, 255, 255, 0.05)",
+        "color": "#CFFDFC",
+    },
+    ".response-markdown code": {
+        "font-family": '"JetBrains Mono", "Courier New", monospace',
+        "font-size": "0.92rem",
+        "background": "rgba(0, 0, 0, 0.42)",
+        "border": "1px solid rgba(143, 216, 143, 0.18)",
+        "border-radius": "8px",
+        "padding": "0.12rem 0.38rem",
+    },
+    ".response-markdown pre": {
+        "background": "rgba(0, 0, 0, 0.48)",
+        "border": "1px solid rgba(0, 255, 255, 0.16)",
+        "border-radius": "14px",
+        "padding": "1rem 1.1rem",
+        "overflow-x": "auto",
+        "margin": "1rem 0",
+    },
+    ".response-markdown pre code": {
+        "background": "transparent",
+        "border": "none",
+        "padding": "0",
+        "font-size": "0.9rem",
+    },
+    ".response-markdown table": {
+        "width": "100%",
+        "border-collapse": "collapse",
+        "margin": "1rem 0",
+        "font-size": "0.96rem",
+    },
+    ".response-markdown th, .response-markdown td": {
+        "border": "1px solid rgba(143, 216, 143, 0.18)",
+        "padding": "0.7rem 0.8rem",
+        "text-align": "left",
+        "vertical-align": "top",
+    },
+    ".response-markdown th": {
+        "background": "rgba(0, 255, 255, 0.08)",
+        "color": "#EFFFF9",
     },
     "@keyframes terminalFlicker": {
         "0%": {"opacity": "0.94", "filter": "drop-shadow(0 0 1px rgba(0, 255, 0, 0.35))"},
@@ -237,12 +579,45 @@ def _render_custom_css(rules: dict[str, Any]) -> str:
 class AgentDashboardState(rx.State):
     agent_sessions: list[AgentSession] = _build_sessions()
     active_session_id: str = "AGENT-1"
+    dashboard_snapshot: str = rx.LocalStorage("", name=STATE_SNAPSHOT_STORAGE_KEY, sync=True)
+    snapshot_hydrated: bool = False
 
     cpu_usage: int = 24
     ram_usage: int = 58
     net_mbps: float = 8.4
     alert_count: int = 1
     sensor_health: str = "Nominal"
+
+    def _persist_dashboard_snapshot(self) -> None:
+        self.dashboard_snapshot = _serialize_dashboard_snapshot(
+            self.agent_sessions,
+            active_session_id=self.active_session_id,
+            cpu_usage=self.cpu_usage,
+            ram_usage=self.ram_usage,
+            net_mbps=self.net_mbps,
+            alert_count=self.alert_count,
+            sensor_health=self.sensor_health,
+        )
+
+    @rx.event
+    def hydrate_from_snapshot(self) -> None:
+        if self.snapshot_hydrated:
+            return
+        self.snapshot_hydrated = True
+
+        restored = _deserialize_dashboard_snapshot(self.dashboard_snapshot)
+        if restored is None:
+            self._persist_dashboard_snapshot()
+            return
+
+        self.agent_sessions = restored["agent_sessions"]
+        self.active_session_id = restored["active_session_id"]
+        self.cpu_usage = restored["cpu_usage"]
+        self.ram_usage = restored["ram_usage"]
+        self.net_mbps = restored["net_mbps"]
+        self.alert_count = restored["alert_count"]
+        self.sensor_health = restored["sensor_health"]
+        self._persist_dashboard_snapshot()
 
     @rx.var
     def busy_count(self) -> int:
@@ -281,6 +656,7 @@ class AgentDashboardState(rx.State):
         self.net_mbps = round(random.uniform(1.2, 4.6) + (active_load * 1.8), 1)
         self.alert_count = review_load + random.randint(0, 1)
         self.sensor_health = "Elevated" if self.cpu_usage >= 70 or active_load >= 3 or review_load else "Nominal"
+        self._persist_dashboard_snapshot()
 
     @rx.event
     def trigger_refresh_system_health(self) -> None:
@@ -302,6 +678,7 @@ class AgentDashboardState(rx.State):
         )
         self.active_session_id = new_session.session_id
         self._refresh_system_health()
+        self._persist_dashboard_snapshot()
 
     @rx.event
     def remove_agent(self, session_id: str) -> None:
@@ -318,6 +695,7 @@ class AgentDashboardState(rx.State):
         if self.active_session_id == session_id:
             self.active_session_id = self.agent_sessions[0].session_id if self.agent_sessions else ""
         self._refresh_system_health()
+        self._persist_dashboard_snapshot()
 
     @rx.var
     def visible_sessions(self) -> list[AgentSession]:
@@ -339,6 +717,7 @@ class AgentDashboardState(rx.State):
         if self._index_for_session_id(session_id) is None:
             return
         self.active_session_id = session_id
+        self._persist_dashboard_snapshot()
 
     def set_session_command(self, session_id: str, value: str) -> None:
         index = self._index_for_session_id(session_id)
@@ -362,13 +741,62 @@ class AgentDashboardState(rx.State):
         sessions = list(self.agent_sessions)
         sessions[index] = session
         self.agent_sessions = sessions
+        self._persist_dashboard_snapshot()
 
     def _append_log(self, index: int, role: str, content: str) -> None:
         cleaned = content.rstrip()
         if not cleaned:
             return
         session = self._session_copy(index)
-        session.logs = [*session.logs, _log_entry(role, cleaned)][-MAX_LOG_ENTRIES:]
+        updated_logs = [*session.logs, _log_entry(role, cleaned)]
+        overflow = max(0, len(updated_logs) - MAX_LOG_ENTRIES)
+        session.logs = updated_logs[-MAX_LOG_ENTRIES:]
+        if session.prompt_response_log_index is not None:
+            session.prompt_response_log_index -= overflow
+            if session.prompt_response_log_index < 0:
+                session.prompt_response_log_index = None
+        self._store_session(index, session)
+
+    def _capture_prompt_dispatch_output(self, index: int, message: str) -> None:
+        session = self._session_copy(index)
+        session.prompt_stream_lines = [*session.prompt_stream_lines, message][-PROMPT_STREAM_LINE_LIMIT:]
+        self._store_session(index, session)
+
+        extracted = _extract_prompt_response_from_lines(session.prompt_stream_lines)
+        if extracted:
+            self._upsert_prompt_response_log(index, extracted)
+
+    def _upsert_prompt_response_log(self, index: int, content: str) -> None:
+        cleaned = content.strip()
+        if not cleaned:
+            return
+
+        session = self._session_copy(index)
+        logs, response_index = _upsert_assistant_response_log(
+            session.logs,
+            session.prompt_response_log_index,
+            cleaned,
+        )
+        session.logs = logs
+        session.prompt_response_log_index = response_index
+        self._store_session(index, session)
+
+    def _finalize_prompt_dispatch_output(self, index: int, output: Any) -> None:
+        session = self._session_copy(index)
+        combined_lines = list(session.prompt_stream_lines)
+        if isinstance(output, str) and output:
+            combined_lines.extend(output.splitlines())
+
+        extracted = _extract_prompt_response_from_lines(
+            combined_lines,
+            fallback_to_plain_text=True,
+        )
+        if extracted:
+            self._upsert_prompt_response_log(index, extracted)
+
+        session = self._session_copy(index)
+        session.prompt_stream_lines = []
+        session.prompt_response_log_index = None
         self._store_session(index, session)
 
     @staticmethod
@@ -602,6 +1030,8 @@ class AgentDashboardState(rx.State):
         session.last_command = command
         session.active_tool_name = tool_name
         session.status_line = "Running policy verification."
+        session.prompt_stream_lines = []
+        session.prompt_response_log_index = None
         session.tier_status = {tier_key: "pending" for tier_key, _ in AUDIT_TIERS}
         session.logs = [
             *session.logs,
@@ -618,14 +1048,21 @@ class AgentDashboardState(rx.State):
             return
 
         async with self:
+            if index >= len(self.agent_sessions):
+                return
+
+            session = self._session_copy(index)
+
+            if channel == "stdout" and session.active_tool_name == PROMPT_DISPATCH_TOOL:
+                self._capture_prompt_dispatch_output(index, message)
+                return
+
             role = "Tool"
-            if channel == "status" and index < len(self.agent_sessions):
-                session = self._session_copy(index)
+            if channel == "status":
                 session.status_line = message
                 role = self._role_for_runtime_event(channel, session.active_tool_name)
                 self._store_session(index, session)
-            elif index < len(self.agent_sessions):
-                session = self._session_copy(index)
+            else:
                 role = self._role_for_runtime_event(channel, session.active_tool_name)
             self._append_log(index, role, message)
 
@@ -686,6 +1123,7 @@ class AgentDashboardState(rx.State):
                 return
 
             if execution_result.tool_name == PROMPT_DISPATCH_TOOL:
+                self._finalize_prompt_dispatch_output(index, execution_result.output)
                 self._apply_report_state(
                     index,
                     report,
@@ -771,6 +1209,24 @@ class AgentDashboardState(rx.State):
 
         await self._dispatch_verified_action(index, action=action, session=session, report=report)
 
+    async def _start_session_command(self, session_id: str, command: str | None = None) -> None:
+        async with self:
+            index = self._index_for_session_id(session_id)
+            if index is None:
+                return
+
+            session = self._session_copy(index)
+            command_text = (command if command is not None else session.command_input).strip()
+            if not command_text or session.is_busy:
+                return
+
+            action = self._parse_prompt_to_action(command_text)
+
+            self._prime_session(index, command_text, str(action.get("tool_name", "") or ""))
+            self._refresh_system_health()
+
+        await self._run_session_command(index, command_text, action)
+
     @rx.event(background=True)
     async def stop_session(self, session_id: str) -> None:
         async with self:
@@ -831,22 +1287,11 @@ class AgentDashboardState(rx.State):
 
     @rx.event(background=True)
     async def process_session_command(self, session_id: str) -> None:
-        async with self:
-            index = self._index_for_session_id(session_id)
-            if index is None:
-                return
+        await self._start_session_command(session_id)
 
-            session = self._session_copy(index)
-            command = session.command_input.strip()
-            if not command or session.is_busy:
-                return
-
-            action = self._parse_prompt_to_action(command)
-
-            self._prime_session(index, command, str(action.get("tool_name", "") or ""))
-            self._refresh_system_health()
-
-        await self._run_session_command(index, command, action)
+    @rx.event(background=True)
+    async def submit_session_command(self, session_id: str, form_data: dict[str, str]) -> None:
+        await self._start_session_command(session_id, str(form_data.get("command_input", "") or ""))
 
     @rx.event(background=True)
     async def approve_pending_action(self, session_id: str) -> None:
@@ -948,13 +1393,16 @@ class AgentDashboardState(rx.State):
 
 def neon_panel(*children: rx.Component, class_name: str = "", **props: Any) -> rx.Component:
     panel_class_name = "neon-panel" if not class_name else f"neon-panel {class_name}"
+    panel_props = {
+        "border_radius": "14px",
+        "padding": "14px",
+        "width": "100%",
+        **props,
+    }
     return rx.box(
         *children,
         class_name=panel_class_name,
-        border_radius="14px",
-        padding="14px",
-        width="100%",
-        **props,
+        **panel_props,
     )
 
 
@@ -1197,16 +1645,53 @@ def render_log_entry(entry: dict[str, str]) -> rx.Component:
     return rx.cond(
         entry["role"] == "Assistant",
         rx.box(
-            rx.text(
-                entry["content"],
-                color=TEXT_PRIMARY,
-                font_size="1rem",
-                line_height="1.75",
-                white_space="pre-wrap",
+            rx.vstack(
+                rx.hstack(
+                    rx.text("Assistant", color=NEON_CYAN, font_size="0.72rem", font_weight="700", letter_spacing="0.06em"),
+                    rx.spacer(),
+                    rx.text(entry["timestamp"], color="#6FAFAD", font_size="0.68rem"),
+                    width="100%",
+                    align="center",
+                ),
+                rx.markdown(
+                    entry["content"],
+                    class_name="response-markdown",
+                    use_raw=False,
+                    width="100%",
+                ),
+                spacing="3",
+                align="stretch",
+                width="100%",
             ),
+            class_name="response-card",
             width="100%",
         ),
-        rx.box(display="none"),
+        rx.cond(
+            entry["role"] == "User",
+            rx.box(
+                rx.vstack(
+                    rx.hstack(
+                        rx.text("User", color=NEON_GREEN, font_size="0.72rem", font_weight="700", letter_spacing="0.06em"),
+                        rx.spacer(),
+                        rx.text(entry["timestamp"], color="#74C874", font_size="0.68rem"),
+                        width="100%",
+                        align="center",
+                    ),
+                    rx.markdown(
+                        entry["content"],
+                        class_name="response-markdown",
+                        use_raw=False,
+                        width="100%",
+                    ),
+                    spacing="3",
+                    align="stretch",
+                    width="100%",
+                ),
+                class_name="user-card",
+                width="100%",
+            ),
+            rx.box(display="none"),
+        ),
     )
 
 
@@ -1225,14 +1710,16 @@ def terminal_window(session: AgentSession) -> rx.Component:
             class_name="terminal-flicker",
             height="100%",
             width="100%",
-            background="#000000",
+            background="transparent",
             border_radius="0",
-            padding="32px 36px",
+            padding="24px 24px 28px 24px",
         ),
-        background="#000000",
+        background="linear-gradient(180deg, rgba(4, 12, 10, 0.96) 0%, rgba(1, 5, 5, 0.96) 100%)",
         width="100%",
         height="100%",
         min_height="0",
+        border_radius="18px",
+        border="1px solid rgba(0, 255, 255, 0.14)",
     )
 
 
@@ -1253,6 +1740,121 @@ def session_selector_button(session: AgentSession) -> rx.Component:
         padding="10px 12px",
         border_radius="12px",
         _hover={"background": "rgba(0, 255, 0, 0.1)"},
+    )
+
+
+def dashboard_header() -> rx.Component:
+    return neon_panel(
+        rx.hstack(
+            rx.vstack(
+                rx.text("CERBERUS AI | Dynamic Terminal Workspace", color=NEON_GREEN, font_size="1.05rem", font_weight="700"),
+                rx.text(
+                    "Each agent owns a dedicated terminal. The workspace starts focused, expands to two columns when needed, and caps at a clean 2x2 grid.",
+                    color=MUTED_TEXT,
+                    font_size="0.78rem",
+                ),
+                spacing="1",
+                align="start",
+            ),
+            rx.spacer(),
+            rx.vstack(
+                rx.text("LIVE GRID", color=NEON_CYAN, font_size="0.8rem", font_weight="700"),
+                rx.text(AgentDashboardState.layout_label, color=TEXT_PRIMARY, font_size="1.22rem", font_weight="700"),
+                rx.text(
+                    "Per-terminal dispatch keeps the grid focused on agent output instead of shared controls.",
+                    color="#9ADADA",
+                    font_size="0.72rem",
+                    text_align="right",
+                ),
+                spacing="1",
+                align="end",
+            ),
+            width="100%",
+            align="center",
+        ),
+    )
+
+
+def system_stat(label: str, value: Any, detail: str) -> rx.Component:
+    return neon_panel(
+        rx.vstack(
+            rx.text(label, color=MUTED_TEXT, font_size="0.7rem", font_weight="700", letter_spacing="0.08em"),
+            rx.text(value, color=NEON_GREEN, font_size="1.2rem", font_weight="700"),
+            rx.text(detail, color="#89B889", font_size="0.68rem"),
+            spacing="1",
+            align="start",
+            width="100%",
+        ),
+        border_radius="12px",
+        padding="12px",
+        width="100%",
+    )
+
+
+def system_sidebar() -> rx.Component:
+    return neon_panel(
+        rx.vstack(
+            rx.text("OPS SIDEBAR", color=NEON_GREEN, font_size="0.98rem", font_weight="700"),
+            rx.text("Global stats, capacity, and project metadata.", color=MUTED_TEXT, font_size="0.74rem"),
+            rx.button(
+                "Add Agent",
+                on_click=AgentDashboardState.add_agent,
+                width="100%",
+                background="#021402",
+                color=NEON_GREEN,
+                border=f"1px solid {NEON_GREEN}",
+                _hover={"background": "#042004"},
+                is_disabled=rx.cond(AgentDashboardState.can_add_agent, False, True),
+            ),
+            system_stat("AGENTS", AgentDashboardState.session_count, f"Capacity: {MAX_SESSIONS} terminal windows"),
+            system_stat("LAYOUT", AgentDashboardState.layout_label, "Reactive 1x1 / 2x1 / 2x2 workspace"),
+            system_stat("FOCUS", AgentDashboardState.active_session_label, "Currently selected terminal"),
+            rx.divider(border_color=NEON_GREEN),
+            system_stat("CPU", f"{AgentDashboardState.cpu_usage}%", "Audit-loop compute pressure"),
+            system_stat("RAM", f"{AgentDashboardState.ram_usage}%", "Session cache residency"),
+            system_stat("NETWORK", f"{AgentDashboardState.net_mbps} MB/s", "Synthetic control traffic"),
+            system_stat("REVIEWS", AgentDashboardState.review_count, "Sessions waiting for operator approval"),
+            system_stat("BUSY NODES", f"{AgentDashboardState.busy_count}", "Sessions currently processing"),
+            system_stat("CLEARED", f"{AgentDashboardState.cleared_count}", "Sessions with all tiers cleared"),
+            system_stat("ALERTS", f"{AgentDashboardState.alert_count}", AgentDashboardState.sensor_health),
+            rx.divider(border_color=NEON_GREEN),
+            neon_panel(
+                rx.vstack(
+                    rx.text("PROJECT METADATA", color=NEON_CYAN, font_size="0.76rem", font_weight="700"),
+                    rx.text("Repository", color=MUTED_TEXT, font_size="0.66rem", letter_spacing="0.08em"),
+                    rx.text(str(REPO_ROOT), color=TEXT_PRIMARY, font_size="0.72rem", white_space="pre-wrap"),
+                    rx.text("Workspace Root", color=MUTED_TEXT, font_size="0.66rem", letter_spacing="0.08em"),
+                    rx.text(
+                        str(_default_workspaces_root()),
+                        color=TEXT_PRIMARY,
+                        font_size="0.72rem",
+                        white_space="pre-wrap",
+                    ),
+                    spacing="2",
+                    align="start",
+                    width="100%",
+                ),
+            ),
+            rx.button(
+                "Refresh Health",
+                on_click=AgentDashboardState.trigger_refresh_system_health,
+                width="100%",
+                background="#021402",
+                color=NEON_GREEN,
+                border=f"1px solid {NEON_GREEN}",
+                _hover={"background": "#042004"},
+            ),
+            spacing="3",
+            width="100%",
+            align="stretch",
+        ),
+        width="300px",
+        min_width="300px",
+        max_width="300px",
+        height="100%",
+        overflow_y="auto",
+        border_radius="16px",
+        padding="16px",
     )
 
 
@@ -1281,41 +1883,46 @@ def active_command_form(session: AgentSession) -> rx.Component:
                 align="center",
             ),
             rx.hstack(
-                rx.form(
-                    rx.text_area(
-                        value=session.command_input,
-                        on_change=AgentDashboardState.set_session_command(session.session_id),
-                        enter_key_submit=True,
-                        placeholder="Type a prompt for the active agent. Press Enter to send.",
-                        rows="1",
-                        resize="none",
-                        disabled=session.is_busy,
-                        width="100%",
-                        min_height="56px",
-                        padding="14px 16px",
-                        background="rgba(0, 0, 0, 0.86)",
-                        color=TEXT_PRIMARY,
-                        border=f"1px solid {NEON_GREEN}",
-                        border_radius="12px",
-                        line_height="1.5",
-                        _focus={
-                            "border": f"1px solid {NEON_CYAN}",
-                            "box_shadow": f"0 0 0 1px {NEON_CYAN}",
-                        },
-                    ),
-                    on_submit=lambda _form_data: AgentDashboardState.process_session_command(session.session_id),
+                rx.el.textarea(
+                    value=session.command_input,
+                    on_change=AgentDashboardState.set_session_command(session.session_id),
+                    auto_height=True,
+                    custom_attrs={
+                        "data-command-submit": "true",
+                        "onKeyDown": Var(
+                            _js_expr="(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const runButton = document.querySelector('[data-run-command=\"true\"]'); if (runButton) { window.setTimeout(() => runButton.click(), 150); } } }",
+                        ),
+                    },
+                    placeholder="Type a prompt for the active agent. Press Enter to send.",
+                    rows=1,
+                    resize="none",
+                    disabled=session.is_busy,
                     width="100%",
+                    min_height="56px",
+                    max_height="180px",
+                    padding="14px 16px",
+                    background="rgba(0, 0, 0, 0.86)",
+                    color=TEXT_PRIMARY,
+                    border=f"1px solid {NEON_GREEN}",
+                    border_radius="12px",
+                    line_height="1.5",
+                    _focus={
+                        "outline": "none",
+                        "border": f"1px solid {NEON_CYAN}",
+                        "box_shadow": f"0 0 0 1px {NEON_CYAN}",
+                    },
                 ),
                 rx.button(
                     "Run",
                     on_click=AgentDashboardState.process_session_command(session.session_id),
+                    custom_attrs={"data-run-command": "true"},
                     background="rgba(0, 255, 0, 0.08)",
                     color=NEON_GREEN,
                     border=f"1px solid {NEON_GREEN}",
                     min_width="96px",
                     height="56px",
                     _hover={"background": "rgba(0, 255, 0, 0.14)"},
-                    is_disabled=session.is_busy,
+                    is_disabled=rx.cond(session.is_busy, True, session.command_input == ""),
                 ),
                 width="100%",
                 align="stretch",
@@ -1387,7 +1994,12 @@ def bottom_command_bar() -> rx.Component:
         border_top=f"1px solid {NEON_GREEN}",
         box_shadow="0 -10px 32px rgba(0, 0, 0, 0.55)",
         padding="14px 18px 18px",
-        width="100%",
+        width="100vw",
+        position="fixed",
+        bottom="0",
+        left="0",
+        right="0",
+        z_index="999",
         flex_shrink="0",
     )
 
@@ -1413,7 +2025,7 @@ def workspace_grid() -> rx.Component:
             rx.vstack(
                 rx.text("No active terminals", color=MUTED_TEXT, font_size="1rem", font_weight="700"),
                 rx.text(
-                    "Attach an agent from the bottom command bar and the workspace will snap back into view.",
+                    "Use the sidebar to attach an agent terminal and the workspace will snap back into view.",
                     color=MUTED_TEXT,
                     font_size="0.85rem",
                 ),
@@ -1452,15 +2064,32 @@ def workspace_grid() -> rx.Component:
 
 def index() -> rx.Component:
     return rx.box(
-        rx.vstack(
-            workspace_grid(),
-            bottom_command_bar(),
-            spacing="0",
+        rx.box(
+            rx.hstack(
+                system_sidebar(),
+                rx.vstack(
+                    dashboard_header(),
+                    workspace_grid(),
+                    spacing="4",
+                    align="stretch",
+                    width="100%",
+                    height="100%",
+                    min_height="0",
+                ),
+                spacing="4",
+                align="stretch",
+                width="100%",
+                height="100%",
+                min_height="0",
+            ),
             width="100%",
             height="100%",
             min_height="0",
-            align="stretch",
+            padding="20px 20px 240px 20px",
+            box_sizing="border-box",
+            overflow="hidden",
         ),
+        bottom_command_bar(),
         class_name="dashboard-root",
         background=BG_BLACK,
         color=TEXT_PRIMARY,
@@ -1489,7 +2118,7 @@ app = rx.App(
                 "font_family": '"JetBrains Mono", "Courier New", monospace',
         },
         stylesheets=[
-                "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap"
+            "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
         ],
         head_components=[
                 rx.el.style(_render_custom_css(custom_css)),
@@ -1512,26 +2141,68 @@ app = rx.App(
                                 document.querySelectorAll('.terminal-flicker').forEach(ensureObserver);
                             }
 
-                            if (document.readyState === 'loading') {
-                                document.addEventListener('DOMContentLoaded', attachExisting);
-                            } else {
-                                attachExisting();
-                            }
+                            function startAutoScrollObservers() {
+                                if (!document.body) {
+                                    return false;
+                                }
 
-                            const bodyObserver = new MutationObserver((mutations) => {
-                                for (const m of mutations) {
-                                    for (const n of m.addedNodes) {
-                                        if (n.nodeType === 1) {
-                                            if (n.classList && n.classList.contains('terminal-flicker')) ensureObserver(n);
-                                            n.querySelectorAll && n.querySelectorAll('.terminal-flicker').forEach(ensureObserver);
+                                attachExisting();
+
+                                if (document.body.__hasTerminalBodyObserver) {
+                                    return true;
+                                }
+
+                                document.body.__hasTerminalBodyObserver = true;
+
+                                const bodyObserver = new MutationObserver((mutations) => {
+                                    for (const m of mutations) {
+                                        for (const n of m.addedNodes) {
+                                            if (n.nodeType === 1) {
+                                                if (n.classList && n.classList.contains('terminal-flicker')) ensureObserver(n);
+                                                n.querySelectorAll && n.querySelectorAll('.terminal-flicker').forEach(ensureObserver);
+                                            }
                                         }
                                     }
-                                }
-                            });
-                            bodyObserver.observe(document.body, { childList: true, subtree: true });
+                                });
+
+                                bodyObserver.observe(document.body, { childList: true, subtree: true });
+                                return true;
+                            }
+
+                            if (!startAutoScrollObservers()) {
+                                document.addEventListener('DOMContentLoaded', startAutoScrollObservers, { once: true });
+                            }
+
                         })();
                         """
                 ),
         ],
 )
-app.add_page(index, route="/")
+# Override the default Reflex ErrorBoundary fallback to remove the
+# built-in "Built with Reflex" attribution that appears in the
+# default error UI. Provide a minimal, private-only fallback UI.
+app.app_wraps[(55, "ErrorBoundary")] = lambda stateful: error_boundary(
+    **({"on_error": noop()} if not stateful else {}),
+    fallback_render=rx.box(
+        rx.vstack(
+            rx.heading(
+                "An error occurred while rendering this page.",
+                font_size="1.5rem",
+                font_weight="bold",
+            ),
+            rx.text(
+                "This is an application error. Refreshing may help.",
+                opacity="0.75",
+            ),
+        ),
+        height="100%",
+        width="100%",
+        display="flex",
+        align_items="center",
+        justify_content="center",
+        background="#fff",
+        color="#000",
+    ),
+)
+
+app.add_page(index, route="/", on_load=AgentDashboardState.hydrate_from_snapshot)

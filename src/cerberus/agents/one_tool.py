@@ -25,6 +25,7 @@ from openai import AsyncOpenAI
 from cerberus.sdk.agents import Agent, FunctionTool, OpenAIChatCompletionsModel, function_tool
 from cerberus.tools.all_tools import get_all_tools, get_tool
 from cerberus.tools.workspace import get_project_space
+from cerberus.util.config import get_effective_api_base, get_effective_api_key, get_effective_model
 from cerberus.util import create_system_prompt_renderer
 
 
@@ -557,16 +558,25 @@ for _meta in get_all_tools():
     continue
 
 
-one_tool_agent = Agent(
-  name="CTF agent",
-  description="Agent focused on conquering security challenges using generic linux commands.",
-  instructions=create_system_prompt_renderer(_one_tool_prompt),
-  tools=_tools,
-  model=OpenAIChatCompletionsModel(
-    model=os.getenv("CERBERUS_MODEL", "cerebro1"),
-    openai_client=AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", "sk-placeholder-key-for-local-models")),
-  ),
-)
+def _build_one_tool_agent() -> Agent:
+  return Agent(
+    name="CTF agent",
+    description="Agent focused on conquering security challenges using generic linux commands.",
+    instructions=create_system_prompt_renderer(_one_tool_prompt),
+    tools=_tools,
+    model=OpenAIChatCompletionsModel(
+      model=get_effective_model(),
+      openai_client=AsyncOpenAI(
+        api_key=get_effective_api_key(default="sk-placeholder-key-for-local-models"),
+        base_url=get_effective_api_base(),
+      ),
+      agent_name="CTF agent",
+      agent_type="one_tool_agent",
+    ),
+  )
+
+
+one_tool_agent = _build_one_tool_agent()
 
 
 cerebro_atomic_runner = CerebroAtomicRunner()
@@ -574,7 +584,7 @@ cerebro_atomic_runner = CerebroAtomicRunner()
 
 def transfer_to_one_tool_agent(**kwargs: Any) -> Agent:
   _ = kwargs
-  return one_tool_agent.clone()
+  return _build_one_tool_agent()
 
 
 __all__ = [

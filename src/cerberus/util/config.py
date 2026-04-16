@@ -35,7 +35,7 @@ _RTX_5090_VRAM_RESERVE_MB = 4_096
 
 def _is_local_provider_configured() -> bool:
     """Return True when environment indicates a local LLM provider."""
-    model_value = os.getenv("CERBERUS_MODEL", "").strip().lower()
+    model_value = get_effective_model(default="").strip().lower()
     local_prefixes = (
         "ollama",
         "litellm",
@@ -69,19 +69,79 @@ def should_suppress_openai_api_key_warning() -> bool:
     return _is_local_provider_configured()
 
 
-def get_effective_api_base(default: str = "http://localhost:8000/v1") -> str:
-    """Return API base honoring the Cerberus-prefixed variable."""
+def _first_configured_env(*keys: str) -> str:
+    """Return the first non-empty environment value from the provided keys."""
+    for key in keys:
+        value = os.getenv(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def has_explicit_api_base_config() -> bool:
+    """Return True when an OpenAI-compatible endpoint was explicitly configured."""
+    return bool(
+        _first_configured_env(
+            "CERBERUS_API_BASE",
+            "CEREBRO_API_BASE",
+            "LOCAL_API_BASE",
+            "OPENAI_API_BASE",
+            "OPENAI_BASE_URL",
+            "LITELLM_BASE_URL",
+            "LITELLM_SERVER",
+        )
+    )
+
+
+def has_explicit_model_config() -> bool:
+    """Return True when a model id was explicitly configured."""
+    return bool(
+        _first_configured_env(
+            "CERBERUS_MODEL",
+            "CEREBRO_MODEL",
+            "CERBERUS_LOCAL_MODEL",
+        )
+    )
+
+
+def get_effective_model(default: str = "cerebro1") -> str:
+    """Return the effective model id from Cerberus and legacy environment keys."""
     return (
-        os.getenv("CERBERUS_API_BASE")
+        _first_configured_env(
+            "CERBERUS_MODEL",
+            "CEREBRO_MODEL",
+            "CERBERUS_LOCAL_MODEL",
+        )
+        or default
+    )
+
+
+def get_effective_api_base(default: str = "http://localhost:8000/v1") -> str:
+    """Return the effective OpenAI-compatible API base from supported env keys."""
+    return (
+        _first_configured_env(
+            "CERBERUS_API_BASE",
+            "CEREBRO_API_BASE",
+            "LOCAL_API_BASE",
+            "OPENAI_API_BASE",
+            "OPENAI_BASE_URL",
+            "LITELLM_BASE_URL",
+            "LITELLM_SERVER",
+        )
         or default
     )
 
 
 def get_effective_api_key(default: str = "sk-cerberus-1234567890") -> str:
-    """Return API key honoring Cerberus configuration first, then OpenAI fallback."""
+    """Return API key honoring Cerberus and legacy local-provider configuration."""
     return (
-        os.getenv("CERBERUS_API_KEY")
-        or os.getenv("OPENAI_API_KEY")
+        _first_configured_env(
+            "CERBERUS_API_KEY",
+            "CEREBRO_API_KEY",
+            "ALIAS_API_KEY",
+            "OPENAI_API_KEY",
+            "LITELLM_API_KEY",
+        )
         or default
     )
 

@@ -810,6 +810,20 @@ class RunImpl:
         has_native_function_calls = any(
             isinstance(output, ResponseFunctionToolCall) for output in response.output
         )
+        legacy_tool_calls_by_name: dict[str, list[ResponseFunctionToolCall]] = {}
+
+        if has_native_function_calls:
+            for output in response.output:
+                if not isinstance(output, ResponseOutputMessage):
+                    continue
+                legacy_tool_call = cls._extract_legacy_tool_call(
+                    agent=agent,
+                    function_map=function_map,
+                    message=output,
+                )
+                if legacy_tool_call is None:
+                    continue
+                legacy_tool_calls_by_name.setdefault(legacy_tool_call.name, []).append(legacy_tool_call)
 
         for output in response.output:
             if isinstance(output, ResponseOutputMessage):
@@ -861,33 +875,42 @@ class RunImpl:
             if not isinstance(output, ResponseFunctionToolCall):
                 continue
 
-            tools_used.append(output.name)
+            hydrated_output = output
+            if cls._tool_call_has_empty_arguments(output.arguments):
+                legacy_candidates = legacy_tool_calls_by_name.get(output.name) or []
+                if legacy_candidates:
+                    hydrated_output = cls._copy_tool_call_with_arguments(
+                        output,
+                        legacy_candidates.pop(0).arguments,
+                    )
+
+            tools_used.append(hydrated_output.name)
 
             # Handoffs
-            if output.name in handoff_map:
-                items.append(HandoffCallItem(raw_item=output, agent=agent))
+            if hydrated_output.name in handoff_map:
+                items.append(HandoffCallItem(raw_item=hydrated_output, agent=agent))
                 handoff = ToolRunHandoff(
-                    tool_call=output,
-                    handoff=handoff_map[output.name],
+                    tool_call=hydrated_output,
+                    handoff=handoff_map[hydrated_output.name],
                 )
                 run_handoffs.append(handoff)
             # Regular function tool call
             else:
-                if output.name not in function_map:
+                if hydrated_output.name not in function_map:
                     logger.warning(
                         "Model requested unavailable tool '%s' for agent '%s'",
-                        output.name,
+                        hydrated_output.name,
                         agent.name,
                     )
-                    items.append(ToolCallItem(raw_item=output, agent=agent))
-                    missing_functions.append(output)
+                    items.append(ToolCallItem(raw_item=hydrated_output, agent=agent))
+                    missing_functions.append(hydrated_output)
                     continue
 
-                items.append(ToolCallItem(raw_item=output, agent=agent))
+                items.append(ToolCallItem(raw_item=hydrated_output, agent=agent))
                 functions.append(
                     ToolRunFunction(
-                        tool_call=output,
-                        function_tool=function_map[output.name],
+                        tool_call=hydrated_output,
+                        function_tool=function_map[hydrated_output.name],
                     )
                 )
 
@@ -968,6 +991,41 @@ class RunImpl:
             name=tool_name,
             arguments=json.dumps(parameters, ensure_ascii=True, sort_keys=True, separators=(",", ":")),
         )
+
+    @staticmethod
+    def _tool_call_has_empty_arguments(raw_arguments: str | None) -> bool:
+        if raw_arguments is None:
+            return True
+
+        stripped = str(raw_arguments).strip()
+        if not stripped:
+            return True
+
+        try:
+            parsed = parse_json_lenient(stripped)
+        except Exception:
+            return False
+        return isinstance(parsed, dict) and not parsed
+
+    @staticmethod
+    def _copy_tool_call_with_arguments(
+        tool_call: ResponseFunctionToolCall,
+        arguments: str,
+    ) -> ResponseFunctionToolCall:
+        try:
+            return tool_call.model_copy(update={"arguments": arguments})
+        except Exception:
+            kwargs: dict[str, Any] = {
+                "id": tool_call.id,
+                "call_id": tool_call.call_id,
+                "type": "function_call",
+                "name": tool_call.name,
+                "arguments": arguments,
+            }
+            status = getattr(tool_call, "status", None)
+            if status is not None:
+                kwargs["status"] = status
+            return ResponseFunctionToolCall(**kwargs)
 
     @classmethod
     async def execute_function_tool_calls(

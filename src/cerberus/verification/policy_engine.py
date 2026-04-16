@@ -425,7 +425,7 @@ class PolicyEngine:
                 continue
 
             for binary_name in self._binary_requirements_for_call(tool_name, call.get("arguments", {})):
-                if shutil.which(binary_name):
+                if self._binary_available(binary_name):
                     continue
                 findings.append(
                     PolicyFinding(
@@ -932,6 +932,13 @@ class PolicyEngine:
         return deduped
 
     @staticmethod
+    def _binary_available(binary_name: str) -> bool:
+        active_container = str(os.getenv("CERBERUS_ACTIVE_CONTAINER", "") or os.getenv("CEREBRO_ACTIVE_CONTAINER", "")).strip()
+        if active_container:
+            return True
+        return shutil.which(binary_name) is not None
+
+    @staticmethod
     def _first_command_token(command_text: str) -> str:
         text = (command_text or "").strip()
         if not text:
@@ -947,6 +954,8 @@ class PolicyEngine:
                 if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", stripped):
                     continue
             if stripped in {"sudo", "env", "command", "time", "nohup"}:
+                continue
+            if stripped.startswith("-"):
                 continue
             return os.path.basename(stripped)
         return ""

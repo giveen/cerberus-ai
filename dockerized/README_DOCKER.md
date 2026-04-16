@@ -42,7 +42,9 @@ That adds:
 - `cerberus` runtime with `NET_ADMIN`, `NET_RAW`, `/dev/net/tun`, and a Kali-backed `kali-linux-headless` tool baseline
 - Qdrant on `localhost:6333` and `localhost:6334`
 
-The runtime defaults to `CERBERUS_API_BASE=http://127.0.0.1:8001/v1`, so it reaches the dashboard backend through the host-published port instead of `host.docker.internal`.
+The runtime inherits its OpenAI-compatible LLM endpoint from `../.env`, for example `CEREBRO_API_BASE` or `CERBERUS_API_BASE`.
+
+Do not point that value at `http://localhost:8001` or `http://127.0.0.1:8001`. Port `8001` is the Reflex dashboard backend, not an LLM API, so LiteLLM/OpenAI calls will return 404 there.
 
 If you only start the default stack, the runtime container is not launched and those Kali tools are not available to the operator path.
 

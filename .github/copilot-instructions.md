@@ -1,10 +1,12 @@
-<todos title="Dashboard open-source cleanup and input UX" rule="Review steps frequently throughout the conversation and DO NOT stop between steps unless they explicitly require it.">
-- [x] inspect-reflex-banner-and-input-flow: Inspect Reflex config and dashboard layout/input handlers to find the source of the Built with Reflex banner, current prompt placement, and Enter-key behavior. 🔴
-  _Confirmed Reflex open-source config exposes `show_built_with_reflex`, the checked-in source had no prompt bar, and the live screenshot was coming from a stale generated bundle._
-- [x] remove-reflex-banner-and-reposition-input: Update Reflex configuration and dashboard layout so the Reflex badge is removed if supported and the prompt input stays docked at the bottom of the screen. 🔴
-  _Disabled the sticky badge in `rxconfig.py` and rebuilt the page as a flex column with a bottom command dock under the response-only output region._
-- [x] enable-enter-to-submit-and-verify: Wire Enter key submission for the prompt field and run focused validation for dashboard behavior after the UI changes. 🔴
-  _Used a form-backed `rx.text_area` with `enter_key_submit=True`, then passed focused pytest coverage and a production `reflex export --no-zip` compile check._
+<todos title="Fix dropped tool-call arguments in dispatcher" rule="Review steps frequently throughout the conversation and DO NOT stop between steps unless they explicitly require it.">
+- [x] find-tool-dispatch-core-loop: Locate the router/core loop that receives LLM tool_calls and invokes registered Python tools 🔴
+  _Confirmed execution flow in SDK runner and tool wrapper: process_model_response -> execute_function_tool_calls -> FunctionTool.on_invoke_tool._
+- [x] patch-argument-json-parsing: Parse tool_call.function.arguments via json.loads with explicit try/except and debug logging on failure 🔴
+  _Updated openai_chatcompletions parser to attempt json.loads then parse_json_lenient, and log explicit 'Failed to parse tool arguments: ...' on parse failure instead of silent fallback._
+- [x] patch-tool-invocation-unpacking: Ensure dispatcher passes parsed dict via kwargs instead of empty/default dict 🔴
+  _Verified invocation path already uses parsed schema args/kwargs and function call unpacking via the tool wrapper; patched stream normalization path to preserve original arguments when parse fails so kwargs are not fed from coerced {}._
+- [x] validate-with-targeted-tests: Run focused tests or smoke checks covering tool dispatch and argument propagation 🟡
+  _Ran focused OpenAI chat/completions converter+stream tests; all passed after adding regression tests for argument parsing behavior._
 </todos>
 
 <!-- Auto-generated todo section -->

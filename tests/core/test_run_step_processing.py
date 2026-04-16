@@ -96,6 +96,33 @@ async def test_single_tool_call():
 
 
 @pytest.mark.asyncio
+async def test_native_tool_call_with_empty_arguments_uses_legacy_committing_json():
+    agent = Agent(name="test", tools=[get_function_tool(name="test")])
+    response = ModelResponse(
+        output=[
+            get_text_message(
+                'COMMITTING_JSON: {"tool_name":"test","parameters":{"target":"192.168.0.4"}}'
+            ),
+            get_function_tool_call("test", "{}"),
+        ],
+        usage=Usage(),
+        referenceable_id=None,
+    )
+
+    result = RunImpl.process_model_response(
+        agent=agent,
+        response=response,
+        output_schema=None,
+        handoffs=[],
+        all_tools=await agent.get_all_tools(),
+    )
+
+    assert result.functions and len(result.functions) == 1
+    assert result.functions[0].tool_call.name == "test"
+    assert result.functions[0].tool_call.arguments == '{"target":"192.168.0.4"}'
+
+
+@pytest.mark.asyncio
 async def test_missing_tool_call_raises_error():
     agent = Agent(name="test", tools=[get_function_tool(name="test")])
     response = ModelResponse(

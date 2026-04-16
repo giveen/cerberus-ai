@@ -95,7 +95,7 @@ TOOL_CATALOG = {
         "module": "cerberus.tools.reconnaissance.ldap_search",
         "name": "ldap_search",
         "phase": PHASE_RECON,
-        "dependencies": ["ldap"],
+        "dependencies": ["ldapsearch"],
         "description": "Search LDAP directories",
     },
     "nmap": {
@@ -240,29 +240,19 @@ TOOL_CATALOG = {
         "description": "Get Shodan host information",
         "requires_env": ["SHODAN_API_KEY"],
     },
-    "make_google_search": {
-        "module": "cerberus.tools.web.search_web",
-        "name": "make_google_search",
-        "phase": PHASE_RECON,
-        "dependencies": [],
-        "description": "Search Google",
-        "requires_env": ["GOOGLE_SEARCH_API_KEY", "GOOGLE_SEARCH_CX"],
-    },
     "make_web_search_with_explanation": {
         "module": "cerberus.tools.web.search_web",
         "name": "make_web_search_with_explanation",
         "phase": PHASE_RECON,
         "dependencies": [],
-        "description": "Search web with explanations",
-        "requires_env": ["PERPLEXITY_API_KEY"],
+        "description": "Search web with explanations via SearXNG",
     },
-    "query_perplexity": {
+    "searxng_web_search": {
         "module": "cerberus.tools.web.search_web",
-        "name": "query_perplexity",
+        "name": "searxng_web_search",
         "phase": PHASE_RECON,
         "dependencies": [],
-        "description": "Query Perplexity AI",
-        "requires_env": ["PERPLEXITY_API_KEY"],
+        "description": "Search web via local SearXNG instance",
     },
     "run_ssh_command_with_credentials": {
         "module": "cerberus.tools.command_and_control.sshpass",
