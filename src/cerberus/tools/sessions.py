@@ -136,6 +136,7 @@ class ToolSnapshot(BaseModel):
     resolved_category: str = ""
     tool_list: List[str] = Field(default_factory=list)
     execution_plan_hash: str = Field(min_length=1)
+    execution_plan_payload: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolboxSessionState(BaseModel):
@@ -282,6 +283,7 @@ def append_toolbox_tool_snapshot(
         resolved_category=str(resolved_category or ""),
         tool_list=list(tool_list),
         execution_plan_hash=plan_hash,
+        execution_plan_payload=plan_payload,
     )
 
     with TOOLBOX_SESSION_LOCK:

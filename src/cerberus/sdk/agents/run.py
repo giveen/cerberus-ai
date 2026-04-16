@@ -780,11 +780,32 @@ class Runner:
                         enabled=debug_enabled,
                     )
 
-        # Phase 3: Validate tool graph
-        execution_plan = validate_execution_plan(execution_plan)
-
-        # Phase 4: Inject core tools
+        # Phase 3: Inject core tools
         execution_plan = inject_core_tools(execution_plan)
+
+        # Phase 4: Validate tool graph (non-mutating hard gate)
+        validation_result = validate_execution_plan(execution_plan)
+        if not validation_result.is_valid:
+            logger.critical(
+                "Execution plan validation failed for category '%s': errors=%s",
+                selected_category,
+                validation_result.errors,
+            )
+            raise AgentsException(
+                "Deterministic execution-plan validation failure: "
+                + ",".join(validation_result.errors)
+            )
+
+        execution_plan = execution_plan.model_copy(
+            update={
+                "reasoning_trace": [
+                    *execution_plan.reasoning_trace,
+                    "plan_graph_validation="
+                    f"validated:{len(validation_result.validated_tool_ids)} "
+                    f"errors:{'|'.join(validation_result.errors) or 'none'}",
+                ]
+            }
+        )
 
         allowed_tool_names = {node.name for node in execution_plan.tool_nodes}
 

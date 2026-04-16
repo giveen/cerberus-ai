@@ -551,6 +551,14 @@ class ToolResolutionState(str, Enum):
     FAILED = "FAILED"
 
 
+class DeprecationError(RuntimeError):
+    """Raised when deprecated fallback-era APIs are invoked at runtime."""
+
+
+class ExecutionPlanValidationError(RuntimeError):
+    """Raised when deterministic execution-plan validation fails."""
+
+
 class ToolResolutionResult(BaseModel):
     """Explicit stateful tool activation result for one category request."""
 
@@ -575,6 +583,17 @@ class ExecutionPlan(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+
+
+class ExecutionPlanValidationResult(BaseModel):
+    """Non-mutating validation output for execution plans."""
+
+    is_valid: bool
+    errors: List[str] = Field(default_factory=list)
+    validated_tool_ids: List[str] = Field(default_factory=list)
+
+    class Config:
+        frozen = True
 
 
 class ToolRegistry(BaseModel):
@@ -699,63 +718,61 @@ def _dedupe_loaded_tools_by_name(tools: List[Any]) -> List[Any]:
 
 
 def get_global_tools() -> List[Any]:
-    """Lazy-load and return globally available tool callables."""
-    loaded, _ = get_global_tools_with_status()
-    return loaded
+    """Deprecated fallback-era API.
+
+    Runtime callers must use execution-plan construction plus
+    `inject_core_tools(execution_plan)` and then execute the finalized plan.
+    """
+    raise DeprecationError(
+        "get_global_tools() is deprecated and disabled at runtime. "
+        "Core tools must be included only via inject_core_tools(execution_plan)."
+    )
 
 
 def get_global_tools_with_status() -> tuple[List[Any], List[str]]:
-    """Load explicit core tools and return (loaded, unavailable_tool_names)."""
-    loaded: List[Any] = []
-    unavailable: List[str] = []
-    for tool_name in CORE_TOOL_NAMES:
-        try:
-            loaded.append(TOOL_REGISTRY.get_tool_by_name(tool_name))
-        except Exception as exc:
-            unavailable.append(tool_name)
-            if get_cerberus_logger:
-                try:
-                    logger = get_cerberus_logger()
-                    if logger:
-                        logger.action(
-                            "Global tool unavailable during resolution",
-                            data={"tool_name": tool_name, "error": str(exc)},
-                            tags=["warning", "tool_unavailable"],
-                        )
-                except Exception:
-                    pass
-    return _dedupe_loaded_tools_by_name(loaded), sorted(set(unavailable))
+    """Deprecated fallback-era API.
+
+    Core tool inclusion must flow through `inject_core_tools(execution_plan)`
+    during pure planning, not runtime fallback loaders.
+    """
+    raise DeprecationError(
+        "get_global_tools_with_status() is deprecated and disabled at runtime. "
+        "Use inject_core_tools(execution_plan) in planning phase instead."
+    )
 
 
 def merge_with_global_tools(category_tools: List[Any]) -> List[Any]:
-    """Merge category tools with global tools and dedupe by name.
+    """Deprecated fallback-era API.
 
-    This helper no longer performs implicit fallback behavior. If category tools
-    are empty, callers must use explicit stateful resolution via
-    `resolve_tools_for_category`.
+    Runtime merging is disabled: all tool inclusion must be expressed in the
+    execution plan via graph traversal + inject_core_tools.
     """
-    deduped_category_tools = _dedupe_loaded_tools_by_name(list(category_tools))
-    global_tools, unavailable_globals = get_global_tools_with_status()
+    raise DeprecationError(
+        "merge_with_global_tools() is deprecated and disabled at runtime. "
+        "All tool inclusion must flow through execution-plan construction only."
+    )
 
-    if not deduped_category_tools:
-        raise RuntimeError(
-            "Category tools are empty; implicit GLOBAL_TOOLS substitution is disabled. "
-            "Use resolve_tools_for_category for explicit SUCCESS/DEGRADED/FAILED state handling."
-        )
 
-    merged = deduped_category_tools + global_tools
-    merged = _dedupe_loaded_tools_by_name(merged)
-    if not merged:
-        detail = (
-            f"unavailable_global_tools={','.join(unavailable_globals)}"
-            if unavailable_globals
-            else "unavailable_global_tools=none"
-        )
-        raise RuntimeError(
-            "Critical tool resolution failure: merged category/global tool set is empty "
-            f"({detail})"
-        )
-    return merged
+def can_load_tool(tool_id: str) -> bool:
+    """Metadata-only tool availability check used by planning phases.
+
+    This function must remain pure:
+    - no module imports
+    - no registry mutations
+    - no tool instantiation
+    """
+    normalized_tool_id = str(tool_id or "").strip()
+    if not normalized_tool_id:
+        return False
+
+    graph_node = TOOL_GRAPH.nodes_by_id.get(normalized_tool_id)
+    if graph_node is None:
+        return False
+
+    for meta in TOOL_REGISTRY._metadata.values():
+        if meta.category == graph_node.category and meta.name == graph_node.name:
+            return bool(meta.enabled)
+    return False
 
 
 def inject_core_tools(plan: ExecutionPlan) -> ExecutionPlan:
@@ -772,10 +789,6 @@ def inject_core_tools(plan: ExecutionPlan) -> ExecutionPlan:
     nodes_by_name: Dict[str, ToolNode] = {
         node.name: node for node in TOOL_GRAPH.nodes_by_key.values()
     }
-    metadata_key_by_identity: Dict[str, str] = {
-        f"{meta.category}:{meta.name}": key for key, meta in TOOL_REGISTRY._metadata.items()
-    }
-
     seen_tool_ids: Set[str] = {f"{node.category}:{node.name}" for node in existing_nodes}
     unavailable_core_tools: List[str] = []
     injected_core_tools: List[str] = []
@@ -791,20 +804,8 @@ def inject_core_tools(plan: ExecutionPlan) -> ExecutionPlan:
             injected_core_tools.append(tool_name)
             continue
 
-        metadata_key = metadata_key_by_identity.get(tool_id)
-        if metadata_key is None:
-            unavailable_core_tools.append(f"{role}:{tool_name}:missing_registry_metadata")
-            continue
-
-        meta = TOOL_REGISTRY._metadata.get(metadata_key)
-        if meta is None or not meta.enabled:
-            unavailable_core_tools.append(f"{role}:{tool_name}:disabled")
-            continue
-
-        try:
-            TOOL_REGISTRY._load_tool(metadata_key)
-        except ValueError:
-            unavailable_core_tools.append(f"{role}:{tool_name}:load_failed")
+        if not can_load_tool(tool_id):
+            unavailable_core_tools.append(f"{role}:{tool_name}:not_loadable")
             continue
 
         existing_nodes.append(node)
@@ -837,52 +838,68 @@ def inject_core_tools(plan: ExecutionPlan) -> ExecutionPlan:
     )
 
 
-def validate_execution_plan(plan: ExecutionPlan) -> ExecutionPlan:
-    """Validate plan nodes against tool graph identity registry.
+def validate_execution_plan(plan: ExecutionPlan) -> ExecutionPlanValidationResult:
+    """Validate plan deterministically without mutating the plan.
 
-    Validation is deterministic and machine-traceable:
-    - every node must exist in TOOL_GRAPH
-    - no duplicate tool identities in plan
+    Enforced invariants:
+    - No duplicate tool IDs
+    - No missing tool references
+    - No empty tool list
+    - No unresolved dependencies
     """
-    reasoning_trace = list(plan.reasoning_trace)
-    validated_nodes: List[ToolNode] = []
-    invalid_nodes: List[str] = []
-    duplicate_nodes: List[str] = []
-    seen_ids: Set[str] = set()
+    errors: List[str] = []
+    validated_tool_ids: List[str] = []
+
+    if not plan.tool_nodes:
+        errors.append("empty_tool_list")
+
+    nodes_by_name: Dict[str, ToolNode] = {}
+    for node in TOOL_GRAPH.nodes_by_key.values():
+        if node.name:
+            nodes_by_name.setdefault(node.name, node)
+
+    def _resolve_dependency(dep: str) -> ToolNode | None:
+        token = str(dep or "").strip()
+        if not token:
+            return None
+        return nodes_by_name.get(token) or TOOL_GRAPH.nodes_by_key.get(token)
+
+    seen_tool_ids: Set[str] = set()
+    plan_tool_ids: Set[str] = set()
 
     for node in plan.tool_nodes:
         tool_id = f"{node.category}:{node.name}"
-        if tool_id in seen_ids:
-            duplicate_nodes.append(tool_id)
+        if tool_id in seen_tool_ids:
+            errors.append(f"duplicate_tool_id:{tool_id}")
             continue
-        seen_ids.add(tool_id)
+        seen_tool_ids.add(tool_id)
+        plan_tool_ids.add(tool_id)
 
         graph_node = TOOL_GRAPH.nodes_by_id.get(tool_id)
         if graph_node is None:
-            invalid_nodes.append(tool_id)
+            errors.append(f"missing_tool_reference:{tool_id}")
             continue
-        validated_nodes.append(node)
 
-    state = plan.resolution_state
-    if (invalid_nodes or duplicate_nodes) and state == ToolResolutionState.SUCCESS:
-        state = ToolResolutionState.DEGRADED
+        validated_tool_ids.append(tool_id)
 
-    if not validated_nodes:
-        state = ToolResolutionState.FAILED
+    for tool_id in sorted(validated_tool_ids):
+        graph_node = TOOL_GRAPH.nodes_by_id.get(tool_id)
+        if graph_node is None:
+            continue
+        for dependency in graph_node.dependencies:
+            resolved_dependency = _resolve_dependency(dependency)
+            if resolved_dependency is None:
+                errors.append(f"unresolved_dependency_reference:{tool_id}:{dependency}")
+                continue
+            dependency_id = f"{resolved_dependency.category}:{resolved_dependency.name}"
+            if dependency_id not in plan_tool_ids:
+                errors.append(f"unresolved_dependency_missing:{tool_id}:{dependency_id}")
 
-    reasoning_trace.append(
-        "plan_graph_validation="
-        f"validated:{len(validated_nodes)} "
-        f"invalid:{','.join(invalid_nodes) or 'none'} "
-        f"duplicates:{','.join(duplicate_nodes) or 'none'}"
-    )
-
-    return plan.model_copy(
-        update={
-            "tool_nodes": validated_nodes,
-            "resolution_state": state,
-            "reasoning_trace": reasoning_trace,
-        }
+    normalized_errors = sorted(set(errors))
+    return ExecutionPlanValidationResult(
+        is_valid=not normalized_errors,
+        errors=normalized_errors,
+        validated_tool_ids=sorted(set(validated_tool_ids)),
     )
 
 
@@ -1046,9 +1063,6 @@ def _build_execution_plan_for_category(
         f"subgraph_activation=category:{resolved_category} node_count:{len(subgraph_nodes)}"
     )
 
-    metadata_key_by_identity: Dict[str, str] = {
-        f"{meta.category}:{meta.name}": key for key, meta in TOOL_REGISTRY._metadata.items()
-    }
     selected_nodes: List[ToolNode] = []
     unavailable_tools: List[str] = []
     seen_tool_ids: Set[str] = set()
@@ -1058,19 +1072,7 @@ def _build_execution_plan_for_category(
         if tool_id in seen_tool_ids:
             return
 
-        metadata_key = metadata_key_by_identity.get(tool_id)
-        if metadata_key is None:
-            unavailable_tools.append(node.name)
-            return
-
-        meta = TOOL_REGISTRY._metadata.get(metadata_key)
-        if meta is None or not meta.enabled:
-            unavailable_tools.append(node.name)
-            return
-
-        try:
-            TOOL_REGISTRY._load_tool(metadata_key)
-        except ValueError:
+        if not can_load_tool(tool_id):
             unavailable_tools.append(node.name)
             return
 
@@ -1136,12 +1138,51 @@ def build_execution_plan_for_category(category: str) -> ExecutionPlan:
     return _build_execution_plan_for_category(normalized_category, trace=trace)
 
 
-def resolve_tools_for_category(category: str) -> ToolResolutionResult:
-    """Resolve tools for category with explicit SUCCESS/DEGRADED/FAILED state."""
-    requested_category = str(category or "").strip()
-    plan = _build_execution_plan_for_category(requested_category)
-    plan = validate_execution_plan(plan)
+def build_final_execution_plan_for_category(category: str) -> ExecutionPlan:
+    """Build a fully normalized execution plan in a pure planning phase.
+
+    Phase A (PURE):
+    - category normalization and scoring-derived routing
+    - graph validation
+    - explicit core tool injection
+
+    This function must not import tool modules or mutate registry state.
+    """
+    plan = build_execution_plan_for_category(category)
     plan = inject_core_tools(plan)
+
+    validation_result = validate_execution_plan(plan)
+    if not validation_result.is_valid:
+        raise ExecutionPlanValidationError(
+            "Execution plan validation failed: " + ",".join(validation_result.errors)
+        )
+
+    plan = plan.model_copy(
+        update={
+            "reasoning_trace": [
+                *plan.reasoning_trace,
+                "plan_graph_validation="
+                f"validated:{len(validation_result.validated_tool_ids)} "
+                f"errors:{'|'.join(validation_result.errors) or 'none'}",
+            ]
+        }
+    )
+    return plan
+
+
+def execute_execution_plan(plan: ExecutionPlan, *, requested_category: str = "") -> ToolResolutionResult:
+    """Execute a finalized plan by instantiating tools (impure phase).
+
+    Phase B (IMPURE):
+    - tool loading
+    - runtime failure handling
+    """
+    validation_result = validate_execution_plan(plan)
+    if not validation_result.is_valid:
+        raise ExecutionPlanValidationError(
+            "Execution plan validation failed before execution: "
+            + ",".join(validation_result.errors)
+        )
 
     loaded_tools: List[Any] = []
     unavailable_tools: List[str] = []
@@ -1161,20 +1202,31 @@ def resolve_tools_for_category(category: str) -> ToolResolutionResult:
         except ValueError:
             unavailable_tools.append(node.name)
 
+    state = plan.resolution_state
+    if not loaded_tools:
+        state = ToolResolutionState.FAILED
+
     reason: Optional[str] = None
-    if plan.resolution_state == ToolResolutionState.FAILED:
+    if state == ToolResolutionState.FAILED:
         reason = "no_tools_available"
-    elif plan.resolution_state == ToolResolutionState.DEGRADED:
+    elif state == ToolResolutionState.DEGRADED:
         reason = "tool_unavailable_or_category_normalized"
 
     return ToolResolutionResult(
-        state=plan.resolution_state,
-        requested_category=requested_category,
+        state=state,
+        requested_category=str(requested_category or "").strip(),
         resolved_category=plan.resolved_category,
         tools=_dedupe_loaded_tools_by_name(loaded_tools),
         unavailable_tools=sorted(set(unavailable_tools)),
         reason=reason,
     )
+
+
+def resolve_tools_for_category(category: str) -> ToolResolutionResult:
+    """Compatibility wrapper across pure planning + impure execution phases."""
+    requested_category = str(category or "").strip()
+    plan = build_final_execution_plan_for_category(requested_category)
+    return execute_execution_plan(plan, requested_category=requested_category)
 
 
 def detect_intent(prompt: str) -> str:
