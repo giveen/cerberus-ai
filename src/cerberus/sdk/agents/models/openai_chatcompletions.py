@@ -27,12 +27,16 @@ from openai import NOT_GIVEN, AsyncOpenAI, AsyncStream, NotGiven
 try:
     from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
     from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
+    from litellm.exceptions import InternalServerError as LiteLLMInternalServerError
     from litellm.exceptions import NotFoundError as LiteLLMNotFoundError
 except Exception:  # pragma: no cover - fallback for LiteLLM variants
     class LiteLLMBadRequestError(Exception):
         pass
 
     class LiteLLMAPIConnectionError(Exception):
+        pass
+
+    class LiteLLMInternalServerError(Exception):
         pass
 
     class LiteLLMNotFoundError(Exception):
@@ -567,19 +571,45 @@ def _parse_tool_args(raw: str | None, tool_name: str = "") -> dict[str, Any] | N
             parsed = parse_json_lenient(cleaned, prefer_last=True)
             return parsed if isinstance(parsed, dict) else None
         except Exception:
-            _RUNTIME_DEBUG_LOGGER.write(
-                channel="trace_debug",
-                message="tool_argument_parse_failed",
-                payload={
-                    "tool_name": tool_name or "unknown_tool",
-                    "arguments_preview": cleaned[:800],
-                },
-            )
-            if _debug.DONT_LOG_TOOL_DATA:
-                logger.debug("Failed to parse tool arguments for %s", tool_name or "unknown_tool")
-            else:
-                logger.debug("Failed to parse tool arguments: %s", cleaned)
-            return None
+            pass
+
+        # Third pass: attempt bracket/quote completion for truncated or
+        # string-literal-corrupted payloads (e.g. "localhost,"a pattern).
+        try:
+            from cerberus.utils.parsers import close_incomplete_json, find_json_in_text
+            completed = close_incomplete_json(cleaned)
+            if completed:
+                parsed = _json.loads(completed)
+                if isinstance(parsed, dict):
+                    logger.debug(
+                        "Recovered malformed tool arguments for %s via bracket completion",
+                        tool_name or "unknown_tool",
+                    )
+                    return parsed
+            # Last resort: regex-based JSON extraction from noisy text
+            extracted = find_json_in_text(cleaned)
+            if isinstance(extracted, dict):
+                logger.debug(
+                    "Recovered malformed tool arguments for %s via find_json_in_text",
+                    tool_name or "unknown_tool",
+                )
+                return extracted
+        except Exception:
+            pass
+
+        _RUNTIME_DEBUG_LOGGER.write(
+            channel="trace_debug",
+            message="tool_argument_parse_failed",
+            payload={
+                "tool_name": tool_name or "unknown_tool",
+                "arguments_preview": cleaned[:800],
+            },
+        )
+        if _debug.DONT_LOG_TOOL_DATA:
+            logger.debug("Failed to parse tool arguments for %s", tool_name or "unknown_tool")
+        else:
+            logger.debug("Failed to parse tool arguments: %s", cleaned)
+        return None
 
 
 def _coerce_tool_arguments_for_api(raw: Any, tool_name: str = "") -> str:
@@ -617,8 +647,10 @@ def _is_tool_arguments_parse_error(exc: Exception) -> bool:
     message = str(exc).lower()
     return (
         "failed to parse tool call arguments as json" in message
+        or "failed to parse tool call arguments" in message
         or "json.exception.parse_error" in message
-        or "tool call arguments" in message and "parse" in message
+        or ("tool call arguments" in message and "parse" in message)
+        or (isinstance(exc, json.JSONDecodeError))
     )
 
 
@@ -2748,6 +2780,18 @@ class OpenAIChatCompletionsModel(Model):
                     # Let the exception propagate after cleanup
                     raise
 
+                except (LiteLLMInternalServerError, json.JSONDecodeError) as e:
+                    # LiteLLM wraps provider-side parse failures as InternalServerError;
+                    # json.JSONDecodeError may surface directly from the SSE decoder.
+                    # Re-route to the standard recovery path if this is a tool-arg
+                    # parse failure, otherwise re-raise so callers can handle it.
+                    if not _is_tool_arguments_parse_error(e):
+                        logger.error("Non-parse-error from stream: %s", e)
+                        raise
+                    # Fall through to shared recovery block below by re-raising as
+                    # a plain Exception so the next handler picks it up.
+                    raise Exception(str(e)) from e
+
                 except Exception as e:
                     if _is_tool_arguments_parse_error(e):
                         error_text = str(e)
@@ -2814,10 +2858,21 @@ class OpenAIChatCompletionsModel(Model):
                             }
                         )
 
+                        # Build a rich self-correction message that includes the
+                        # raw snippet so the model can see its own mistake in the
+                        # next context window.
+                        _raw_snippet = (
+                            (recovered_tool_arguments or "")[:300]
+                            if recovered_tool_arguments
+                            else error_text[:300]
+                        )
                         correction_message = (
-                            "CRITICAL PARSE ERROR: Your previous tool call arguments were malformed JSON "
-                            "(Syntax Error). You missed a quote, bracket, or comma. Take a deep breath, "
-                            "review your exact syntax, and try calling the tool again with perfect JSON."
+                            "ERROR: Your last tool call contained a JSON Syntax Error "
+                            "(missing bracket or quote). "
+                            f"Review your output: [{_raw_snippet}]. "
+                            "Please re-issue the command with valid JSON format using the "
+                            "COMMITTING_JSON: tag, e.g.: "
+                            f'COMMITTING_JSON: {{"name": "{recovered_tool_name}", "arguments": {{...}}}}'
                         )
                         self.add_to_message_history(
                             {

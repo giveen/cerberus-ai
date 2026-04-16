@@ -88,6 +88,48 @@ if TYPE_CHECKING:
     from .run import RunConfig
 
 
+# ---------------------------------------------------------------------------
+# Parse-error classification & self-correction helpers
+# ---------------------------------------------------------------------------
+
+def _is_retryable_prompt_dispatch_failure(error: object) -> bool:
+    """Return True when *error* represents a recoverable JSON parse failure.
+
+    Used by runner retry logic to decide whether to inject a self-correction
+    prompt rather than surfacing the raw exception to the caller.
+    """
+    if error is None:
+        return False
+    message = str(error).lower()
+    return (
+        "failed to parse tool call arguments" in message
+        or "malformed json" in message
+        or "json syntax error" in message
+        or "json.exception.parse_error" in message
+        or "tool_arguments_malformed_json" in message
+    )
+
+
+def _build_parse_error_self_correction_message(
+    *,
+    tool_name: str,
+    raw_snippet: str,
+    schema_template: str = "{}",
+) -> str:
+    """Build a system-level correction message injected into session history.
+
+    Includes the raw offending snippet so the model sees its mistake in the
+    next context window, and instructs it to re-issue via COMMITTING_JSON:.
+    """
+    snippet_preview = raw_snippet[:300] if raw_snippet else "(unavailable)"
+    return (
+        "ERROR: Your last tool call contained a JSON Syntax Error (missing bracket or quote). "
+        f"Review your output: [{snippet_preview}]. "
+        "Please re-issue the command with valid JSON format using the COMMITTING_JSON: tag, e.g.: "
+        f'COMMITTING_JSON: {{"name": "{tool_name}", "arguments": {schema_template}}}'
+    )
+
+
 class QueueCompleteSentinel:
     pass
 
@@ -581,10 +623,12 @@ class RunImpl:
         retry_hint = _build_schema_retry_hint(tool_name, params_json_schema)
         fields_text = ", ".join(required_fields) if required_fields else "(none declared)"
         schema_template = retry_hint.get("suggested_arguments_json", "{}")
-        message = (
-            "Error: Malformed JSON arguments. Please ensure you output a valid JSON object. "
-            f"Tool: {tool_name}. Required fields: {fields_text}. "
-            f"Retry with JSON like: {schema_template}"
+        # Use the self-correction message so the model sees its own snippet and
+        # receives a structured COMMITTING_JSON: instruction for the retry turn.
+        message = _build_parse_error_self_correction_message(
+            tool_name=tool_name,
+            raw_snippet=raw_arguments,
+            schema_template=schema_template,
         )
 
         return {
