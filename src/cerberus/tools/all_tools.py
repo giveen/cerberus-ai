@@ -34,6 +34,11 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel, Field, ValidationError
+from cerberus.sdk.planner.models import DependencyKind
+from cerberus.sdk.planner.validator import (
+    UnresolvedDependencyError,
+    validate_plan,
+)
 from cerberus.tools.tool_graph import (
     ToolGraph,
     ToolNode,
@@ -578,6 +583,8 @@ class ExecutionPlan(BaseModel):
 
     resolved_category: str
     tool_nodes: List[ToolNode] = Field(default_factory=list)
+    dependencies: List[str] = Field(default_factory=list)
+    unresolved_references: List[str] = Field(default_factory=list)
     resolution_state: ToolResolutionState
     reasoning_trace: List[str] = Field(default_factory=list)
 
@@ -591,6 +598,9 @@ class ExecutionPlanValidationResult(BaseModel):
     is_valid: bool
     errors: List[str] = Field(default_factory=list)
     validated_tool_ids: List[str] = Field(default_factory=list)
+    unresolved_references: List[str] = Field(default_factory=list)
+    dependency_kinds: Dict[str, str] = Field(default_factory=dict)
+    dependency_trace: List[str] = Field(default_factory=list)
 
     class Config:
         frozen = True
@@ -717,6 +727,17 @@ def _dedupe_loaded_tools_by_name(tools: List[Any]) -> List[Any]:
     return deduped
 
 
+def _collect_plan_dependencies(nodes: List[ToolNode]) -> List[str]:
+    """Collect deterministic dependency tokens from selected plan nodes."""
+    deps: Set[str] = set()
+    for node in nodes:
+        for dep in node.dependencies:
+            token = str(dep or "").strip()
+            if token:
+                deps.add(token)
+    return sorted(deps)
+
+
 def get_global_tools() -> List[Any]:
     """Deprecated fallback-era API.
 
@@ -832,6 +853,7 @@ def inject_core_tools(plan: ExecutionPlan) -> ExecutionPlan:
     return plan.model_copy(
         update={
             "tool_nodes": existing_nodes,
+            "dependencies": _collect_plan_dependencies(existing_nodes),
             "resolution_state": state,
             "reasoning_trace": reasoning_trace,
         }
@@ -845,27 +867,22 @@ def validate_execution_plan(plan: ExecutionPlan) -> ExecutionPlanValidationResul
     - No duplicate tool IDs
     - No missing tool references
     - No empty tool list
-    - No unresolved dependencies
+
+    Dependency references are classified by kind in planner validator:
+    - INTERNAL_TOOL
+    - SYSTEM_BINARY
+    - EXTERNAL_CAPABILITY
     """
     errors: List[str] = []
     validated_tool_ids: List[str] = []
+    dependency_kinds: Dict[str, str] = {}
+    unresolved_references: List[str] = []
+    dependency_trace: List[str] = []
 
     if not plan.tool_nodes:
         errors.append("empty_tool_list")
 
-    nodes_by_name: Dict[str, ToolNode] = {}
-    for node in TOOL_GRAPH.nodes_by_key.values():
-        if node.name:
-            nodes_by_name.setdefault(node.name, node)
-
-    def _resolve_dependency(dep: str) -> ToolNode | None:
-        token = str(dep or "").strip()
-        if not token:
-            return None
-        return nodes_by_name.get(token) or TOOL_GRAPH.nodes_by_key.get(token)
-
     seen_tool_ids: Set[str] = set()
-    plan_tool_ids: Set[str] = set()
 
     for node in plan.tool_nodes:
         tool_id = f"{node.category}:{node.name}"
@@ -873,7 +890,6 @@ def validate_execution_plan(plan: ExecutionPlan) -> ExecutionPlanValidationResul
             errors.append(f"duplicate_tool_id:{tool_id}")
             continue
         seen_tool_ids.add(tool_id)
-        plan_tool_ids.add(tool_id)
 
         graph_node = TOOL_GRAPH.nodes_by_id.get(tool_id)
         if graph_node is None:
@@ -882,24 +898,46 @@ def validate_execution_plan(plan: ExecutionPlan) -> ExecutionPlanValidationResul
 
         validated_tool_ids.append(tool_id)
 
-    for tool_id in sorted(validated_tool_ids):
-        graph_node = TOOL_GRAPH.nodes_by_id.get(tool_id)
-        if graph_node is None:
-            continue
-        for dependency in graph_node.dependencies:
-            resolved_dependency = _resolve_dependency(dependency)
-            if resolved_dependency is None:
-                errors.append(f"unresolved_dependency_reference:{tool_id}:{dependency}")
+    try:
+        dependency_validation = validate_plan(plan, TOOL_GRAPH)
+        dependency_trace.extend(dependency_validation.trace_logs)
+        dependency_kinds.update(
+            {
+                dep_name: dep_kind.value
+                for dep_name, dep_kind in dependency_validation.dependency_kinds.items()
+            }
+        )
+        unresolved_references = list(dependency_validation.unresolved_references)
+    except UnresolvedDependencyError:
+        for dependency in plan.dependencies:
+            token = str(dependency or "").strip()
+            if not token:
                 continue
-            dependency_id = f"{resolved_dependency.category}:{resolved_dependency.name}"
-            if dependency_id not in plan_tool_ids:
-                errors.append(f"unresolved_dependency_missing:{tool_id}:{dependency_id}")
+            graph_hit = TOOL_GRAPH.nodes_by_key.get(token) or TOOL_GRAPH.nodes_by_id.get(token)
+            if graph_hit is not None:
+                dependency_kinds.setdefault(token, DependencyKind.INTERNAL_TOOL.value)
+                continue
+            if shutil.which(token):
+                dependency_kinds[token] = DependencyKind.SYSTEM_BINARY.value
+                dependency_trace.append(
+                    f"Dependency [{token}] resolved as SYSTEM_BINARY via environment path."
+                )
+                continue
+            if token.endswith("_access"):
+                dependency_kinds[token] = DependencyKind.EXTERNAL_CAPABILITY.value
+                continue
+            unresolved_references.append(token)
+
+    unresolved_references = sorted(set(unresolved_references))
 
     normalized_errors = sorted(set(errors))
     return ExecutionPlanValidationResult(
         is_valid=not normalized_errors,
         errors=normalized_errors,
         validated_tool_ids=sorted(set(validated_tool_ids)),
+        unresolved_references=unresolved_references,
+        dependency_kinds=dict(sorted(dependency_kinds.items(), key=lambda item: item[0])),
+        dependency_trace=sorted(set(dependency_trace)),
     )
 
 
@@ -1053,6 +1091,8 @@ def _build_execution_plan_for_category(
         return ExecutionPlan(
             resolved_category="",
             tool_nodes=[],
+            dependencies=[],
+            unresolved_references=[],
             resolution_state=ToolResolutionState.FAILED,
             reasoning_trace=reasoning_trace,
         )
@@ -1101,6 +1141,8 @@ def _build_execution_plan_for_category(
     return ExecutionPlan(
         resolved_category=resolved_category,
         tool_nodes=selected_nodes,
+        dependencies=_collect_plan_dependencies(selected_nodes),
+        unresolved_references=[],
         resolution_state=resolution_state,
         reasoning_trace=reasoning_trace,
     )
@@ -1157,13 +1199,22 @@ def build_final_execution_plan_for_category(category: str) -> ExecutionPlan:
             "Execution plan validation failed: " + ",".join(validation_result.errors)
         )
 
+    normalized_state = plan.resolution_state
+    if validation_result.unresolved_references and normalized_state == ToolResolutionState.SUCCESS:
+        normalized_state = ToolResolutionState.DEGRADED
+
     plan = plan.model_copy(
         update={
+            "resolution_state": normalized_state,
+            "unresolved_references": validation_result.unresolved_references,
             "reasoning_trace": [
                 *plan.reasoning_trace,
                 "plan_graph_validation="
                 f"validated:{len(validation_result.validated_tool_ids)} "
                 f"errors:{'|'.join(validation_result.errors) or 'none'}",
+                "plan_dependency_resolution="
+                f"unresolved:{'|'.join(validation_result.unresolved_references) or 'none'}",
+                *validation_result.dependency_trace,
             ]
         }
     )

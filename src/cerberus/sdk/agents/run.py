@@ -796,13 +796,25 @@ class Runner:
                 + ",".join(validation_result.errors)
             )
 
+        normalized_state = execution_plan.resolution_state
+        if (
+            validation_result.unresolved_references
+            and normalized_state == ToolResolutionState.SUCCESS
+        ):
+            normalized_state = ToolResolutionState.DEGRADED
+
         execution_plan = execution_plan.model_copy(
             update={
+                "resolution_state": normalized_state,
+                "unresolved_references": validation_result.unresolved_references,
                 "reasoning_trace": [
                     *execution_plan.reasoning_trace,
                     "plan_graph_validation="
                     f"validated:{len(validation_result.validated_tool_ids)} "
                     f"errors:{'|'.join(validation_result.errors) or 'none'}",
+                    "plan_dependency_resolution="
+                    f"unresolved:{'|'.join(validation_result.unresolved_references) or 'none'}",
+                    *validation_result.dependency_trace,
                 ]
             }
         )
