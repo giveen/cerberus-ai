@@ -37,6 +37,9 @@ class DebugLogger:
         with self._lock:
             with self._log_path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
+        # Deliberately avoid stdout/stderr mirroring so debug records never leak
+        # back into conversation context.
+        return None
 
 
 _LOGGER: DebugLogger | None = None
@@ -56,6 +59,6 @@ def get_debug_logger() -> DebugLogger:
     if _LOGGER is None:
         with _LOGGER_LOCK:
             if _LOGGER is None:
-                log_path = _workspace_root() / ".cerberus" / "runtime_debug.log"
+                log_path = _workspace_root() / "logs" / "runtime_debug.jsonl"
                 _LOGGER = DebugLogger(log_path=log_path)
     return _LOGGER

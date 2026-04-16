@@ -36,6 +36,24 @@ from cerberus.tools.workspace import get_project_space
 
 console = Console()
 
+_EXTERNAL_TRACE_EXPORT_ENV_KEYS = (
+    "LANGCHAIN_TRACING_V2",
+    "LANGCHAIN_ENDPOINT",
+    "LANGCHAIN_API_KEY",
+    "LANGSMITH_TRACING",
+    "LANGSMITH_ENDPOINT",
+    "LANGSMITH_API_KEY",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_TRACES_EXPORTER",
+)
+
+
+def _disable_external_trace_export_env() -> None:
+    for env_key in _EXTERNAL_TRACE_EXPORT_ENV_KEYS:
+        os.environ.pop(env_key, None)
+    os.environ["CERBERUS_TRACING"] = "false"
+
 _DEFAULT_SAFE_MAX_TURNS = 8
 _MAX_OUTPUT_PREVIEW = 400
 
@@ -126,6 +144,7 @@ class ExecutionSupervisor:
         self._session_user = session_user
 
     async def run(self, *, agent: Any, options: RunOptions) -> ExecutionImpactSummary:
+        _disable_external_trace_export_env()
         started_at = datetime.now(tz=UTC)
         run_id = started_at.strftime("run-%Y%m%dT%H%M%S")
         journal_dir = self._workspace_root / ".cerberus" / "session" / "runs"
@@ -153,12 +172,6 @@ class ExecutionSupervisor:
 
         run_config = RunConfig(
             workflow_name="Supervised REPL Run",
-            trace_include_sensitive_data=False,
-            trace_metadata={
-                "run_id": run_id,
-                "workspace_root": str(self._workspace_root),
-                "agent": getattr(agent, "name", options.agent_name or "agent"),
-            },
         )
         streaming_result = Runner.run_streamed(
             agent,

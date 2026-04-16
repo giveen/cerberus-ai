@@ -43,6 +43,7 @@ SESSION_ROLES = [
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROMPT_DISPATCH_TOOL = "run_supervised_prompt"
 PROMPT_RESPONSE_MARKER = "final output"
+PROMPT_RESPONSE_FALLBACK_MARKER = "response"
 PROMPT_META_MARKERS = (
     "technical safety constraints",
     "audit reasoning",
@@ -54,7 +55,6 @@ PROMPT_META_MARKERS = (
     "cerebro prompt redactions",
 )
 PROMPT_HIDDEN_RESPONSE_MARKERS = (
-    "committing_json:",
     "# session metadata",
     "role: validate and critique proposed actions. do not execute.",
     "policy engine found issues in the current plan",
@@ -177,6 +177,7 @@ class AgentSession(BaseModel):
     status_line: str = "Standing by for a prompt or command."
     prompt_stream_lines: list[str] = Field(default_factory=list)
     prompt_response_log_index: int | None = None
+    prompt_agent: str = "one_tool"
 
 
 def _new_session(index: int) -> AgentSession:
@@ -300,7 +301,8 @@ def _extract_prompt_response_from_lines(
                 captured_lines.append("")
             continue
 
-        if PROMPT_RESPONSE_MARKER in stripped.lower():
+        lowered = stripped.lower()
+        if PROMPT_RESPONSE_MARKER in lowered or lowered == PROMPT_RESPONSE_FALLBACK_MARKER:
             saw_final_output = True
             continue
 
@@ -363,6 +365,9 @@ def _serialize_dashboard_snapshot(
     net_mbps: float,
     alert_count: int,
     sensor_health: str,
+    project_id: str,
+    target_ip: str,
+    session_uuid: str,
 ) -> str:
     payload = {
         "version": STATE_SNAPSHOT_VERSION,
@@ -372,6 +377,9 @@ def _serialize_dashboard_snapshot(
         "net_mbps": float(net_mbps),
         "alert_count": int(alert_count),
         "sensor_health": str(sensor_health),
+        "project_id": str(project_id),
+        "target_ip": str(target_ip),
+        "session_uuid": str(session_uuid),
         "agent_sessions": [session.model_dump(mode="json") for session in sessions],
     }
     return json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
@@ -425,6 +433,9 @@ def _deserialize_dashboard_snapshot(payload: str) -> dict[str, Any] | None:
         "net_mbps": float(parsed.get("net_mbps", 8.4)),
         "alert_count": int(parsed.get("alert_count", 1)),
         "sensor_health": str(parsed.get("sensor_health", "Nominal") or "Nominal"),
+        "project_id": str(parsed.get("project_id", "") or ""),
+        "target_ip": str(parsed.get("target_ip", "") or ""),
+        "session_uuid": str(parsed.get("session_uuid", "") or ""),
     }
 
 
@@ -597,6 +608,19 @@ def _render_custom_css(rules: dict[str, Any]) -> str:
 
 
 class AgentDashboardState(rx.State):
+    _PROMPT_AGENT_ALIASES = {
+        "assistant": "one_tool",
+        "default": "one_tool",
+        "one_tool_agent": "one_tool",
+    }
+
+    @classmethod
+    def _normalize_prompt_agent(cls, value: str) -> str:
+        normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if not normalized:
+            return "one_tool"
+        return cls._PROMPT_AGENT_ALIASES.get(normalized, normalized)
+
     agent_sessions: list[AgentSession] = _build_sessions()
     active_session_id: str = "AGENT-1"
     dashboard_snapshot: str = rx.LocalStorage("", name=STATE_SNAPSHOT_STORAGE_KEY, sync=True)
@@ -607,6 +631,45 @@ class AgentDashboardState(rx.State):
     net_mbps: float = 8.4
     alert_count: int = 1
     sensor_health: str = "Nominal"
+    project_id: str = "unknown"
+    target_ip: str = "unknown"
+    session_uuid: str = "unknown"
+
+    def _resolve_active_session(self) -> AgentSession | None:
+        index = self._index_for_session_id(self.active_session_id)
+        if index is None:
+            return None
+        if index >= len(self.agent_sessions):
+            return None
+        return self.agent_sessions[index]
+
+    def _refresh_session_metadata_from_runtime(self) -> None:
+        active_session = self._resolve_active_session()
+
+        env_project_id = str(os.getenv("CERBERUS_PROJECT_ID", "") or "").strip()
+        env_target_ip = str(os.getenv("CERBERUS_TARGET_IP", "") or "").strip()
+        env_session_uuid = str(os.getenv("CERBERUS_SESSION_UUID", "") or "").strip()
+
+        self.project_id = env_project_id or (active_session.workspace_id if active_session else "unknown")
+        self.target_ip = env_target_ip or "unknown"
+        self.session_uuid = env_session_uuid or (active_session.session_id if active_session else "unknown")
+
+    @rx.event
+    def initialize_session_metadata(self) -> None:
+        self._refresh_session_metadata_from_runtime()
+        self._persist_dashboard_snapshot()
+
+    @rx.var
+    def session_uuid_short(self) -> str:
+        value = str(self.session_uuid or "").strip()
+        if len(value) <= 18:
+            return value or "unknown"
+        return f"{value[:8]}...{value[-6:]}"
+
+    @rx.var
+    def target_status_label(self) -> str:
+        target = str(self.target_ip or "").strip().lower()
+        return "TRACKED" if target and target not in {"unknown", "unset", "none"} else "UNSET"
 
     def _persist_dashboard_snapshot(self) -> None:
         self.dashboard_snapshot = _serialize_dashboard_snapshot(
@@ -617,6 +680,9 @@ class AgentDashboardState(rx.State):
             net_mbps=self.net_mbps,
             alert_count=self.alert_count,
             sensor_health=self.sensor_health,
+            project_id=self.project_id,
+            target_ip=self.target_ip,
+            session_uuid=self.session_uuid,
         )
 
     @rx.event
@@ -640,6 +706,10 @@ class AgentDashboardState(rx.State):
         self.net_mbps = restored["net_mbps"]
         self.alert_count = restored["alert_count"]
         self.sensor_health = restored["sensor_health"]
+        self.project_id = restored["project_id"] or self.project_id
+        self.target_ip = restored["target_ip"] or self.target_ip
+        self.session_uuid = restored["session_uuid"] or self.session_uuid
+        self._refresh_session_metadata_from_runtime()
         self.snapshot_hydrated = True
         self._persist_dashboard_snapshot()
 
@@ -662,6 +732,10 @@ class AgentDashboardState(rx.State):
                     self.net_mbps = restored["net_mbps"]
                     self.alert_count = restored["alert_count"]
                     self.sensor_health = restored["sensor_health"]
+                    self.project_id = restored["project_id"] or self.project_id
+                    self.target_ip = restored["target_ip"] or self.target_ip
+                    self.session_uuid = restored["session_uuid"] or self.session_uuid
+                    self._refresh_session_metadata_from_runtime()
                     self.snapshot_hydrated = True
                     self._persist_dashboard_snapshot()
                     return
@@ -670,6 +744,7 @@ class AgentDashboardState(rx.State):
 
         async with self:
             if not self.snapshot_hydrated:
+                self._refresh_session_metadata_from_runtime()
                 self.snapshot_hydrated = True
                 self._persist_dashboard_snapshot()
 
@@ -731,6 +806,7 @@ class AgentDashboardState(rx.State):
             key=lambda session: session.session_id,
         )
         self.active_session_id = new_session.session_id
+        self._refresh_session_metadata_from_runtime()
         self._refresh_system_health()
         self._persist_dashboard_snapshot()
 
@@ -748,6 +824,7 @@ class AgentDashboardState(rx.State):
         self.agent_sessions = [item for item in self.agent_sessions if item.session_id != session_id]
         if self.active_session_id == session_id:
             self.active_session_id = self.agent_sessions[0].session_id if self.agent_sessions else ""
+        self._refresh_session_metadata_from_runtime()
         self._refresh_system_health()
         self._persist_dashboard_snapshot()
 
@@ -772,6 +849,7 @@ class AgentDashboardState(rx.State):
         if self._index_for_session_id(session_id) is None:
             return
         self.active_session_id = session_id
+        self._refresh_session_metadata_from_runtime()
         self._persist_dashboard_snapshot()
 
     @rx.event
@@ -977,6 +1055,75 @@ class AgentDashboardState(rx.State):
             "arguments": {"prompt": text},
             "prompt": text,
         }
+
+    @staticmethod
+    def _parse_agent_switch_command(text: str) -> tuple[str, str] | None:
+        stripped = text.strip()
+        if not stripped.lower().startswith("/agent"):
+            return None
+
+        try:
+            tokens = shlex.split(stripped, posix=os.name != "nt")
+        except Exception:
+            tokens = stripped.split()
+
+        if not tokens:
+            return ("show", "")
+
+        if len(tokens) == 1:
+            return ("show", "")
+
+        sub = tokens[1].strip().lower()
+        if sub in {"show", "current", "status"}:
+            return ("show", "")
+        if sub == "select":
+            if len(tokens) < 3:
+                return ("invalid", "")
+            return ("set", tokens[2].strip())
+        return ("set", tokens[1].strip())
+
+    def _apply_agent_switch_command(self, index: int, command_text: str) -> bool:
+        parsed = self._parse_agent_switch_command(command_text)
+        if parsed is None:
+            return False
+
+        operation, value = parsed
+        self._append_log(index, "User", command_text)
+        session = self._session_copy(index)
+
+        if operation == "invalid":
+            self._append_log(index, "System", "Usage: /agent <name> or /agent select <name>")
+            session.status = "ready"
+            session.status_line = "Agent switch command requires an agent name."
+            self._store_session(index, session)
+            self._refresh_system_health()
+            return True
+
+        if operation == "show":
+            active_agent = (session.prompt_agent or "one_tool").strip() or "one_tool"
+            self._append_log(index, "System", f"Active prompt agent: {active_agent}")
+            session.status = "ready"
+            session.status_line = f"Prompt agent unchanged ({active_agent})."
+            self._store_session(index, session)
+            self._refresh_system_health()
+            return True
+
+        normalized = self._normalize_prompt_agent(value)
+        if not normalized:
+            self._append_log(index, "System", "Usage: /agent <name> or /agent select <name>")
+            session.status = "ready"
+            session.status_line = "Agent switch command requires an agent name."
+            self._store_session(index, session)
+            self._refresh_system_health()
+            return True
+
+        session.prompt_agent = normalized
+        self._append_log(index, "System", f"Prompt agent set to {normalized}")
+        session.status = "ready"
+        session.status_line = f"Prompt agent switched to {normalized}."
+        self._store_session(index, session)
+        self._refresh_system_health()
+        return True
 
     @staticmethod
     def _looks_like_explicit_command(text: str) -> bool:
@@ -1398,7 +1545,21 @@ class AgentDashboardState(rx.State):
             if not command_text or session.is_busy or session.status == "error":
                 return
 
+            if self._apply_agent_switch_command(index, command_text):
+                self._persist_dashboard_snapshot()
+                return
+
             action = self._parse_prompt_to_action(command_text)
+
+            if str(action.get("tool_name", "")) == PROMPT_DISPATCH_TOOL:
+                session_after = self._session_copy(index)
+                action_arguments = action.get("arguments")
+                if not isinstance(action_arguments, dict):
+                    action_arguments = {}
+                prompt_agent = self._normalize_prompt_agent(session_after.prompt_agent or "one_tool")
+                if prompt_agent:
+                    action_arguments["agent"] = prompt_agent
+                action["arguments"] = action_arguments
 
             self._prime_session(index, command_text, str(action.get("tool_name", "") or ""))
             self._refresh_system_health()
@@ -2202,6 +2363,34 @@ def system_sidebar() -> rx.Component:
             neon_panel(
                 rx.vstack(
                     rx.text("PROJECT METADATA", color=NEON_CYAN, font_size="0.76rem", font_weight="700"),
+                    rx.text("Project ID", color=MUTED_TEXT, font_size="0.66rem", letter_spacing="0.08em"),
+                    rx.text(AgentDashboardState.project_id, color=TEXT_PRIMARY, font_size="0.74rem", white_space="pre-wrap"),
+                    rx.text("Target", color=MUTED_TEXT, font_size="0.66rem", letter_spacing="0.08em"),
+                    rx.hstack(
+                        rx.box(
+                            width="8px",
+                            height="8px",
+                            border_radius="999px",
+                            background=rx.cond(
+                                AgentDashboardState.target_status_label == "TRACKED",
+                                NEON_GREEN,
+                                "#7A7A7A",
+                            ),
+                            box_shadow=rx.cond(
+                                AgentDashboardState.target_status_label == "TRACKED",
+                                f"0 0 8px {NEON_GREEN}",
+                                "none",
+                            ),
+                        ),
+                        rx.text(AgentDashboardState.target_status_label, color=NEON_CYAN, font_size="0.66rem", font_weight="700"),
+                        rx.spacer(),
+                        rx.text(AgentDashboardState.target_ip, color=TEXT_PRIMARY, font_size="0.74rem"),
+                        width="100%",
+                        align="center",
+                        spacing="2",
+                    ),
+                    rx.text("Session UUID", color=MUTED_TEXT, font_size="0.66rem", letter_spacing="0.08em"),
+                    rx.text(AgentDashboardState.session_uuid_short, color=TEXT_PRIMARY, font_size="0.74rem"),
                     rx.text("Repository", color=MUTED_TEXT, font_size="0.66rem", letter_spacing="0.08em"),
                     rx.text(str(REPO_ROOT), color=TEXT_PRIMARY, font_size="0.72rem", white_space="pre-wrap"),
                     rx.text("Workspace Root", color=MUTED_TEXT, font_size="0.66rem", letter_spacing="0.08em"),

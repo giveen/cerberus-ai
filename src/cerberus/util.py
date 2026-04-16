@@ -425,6 +425,17 @@ def _with_think_json_contract(base_instructions: str) -> str:
     return f"{text.rstrip()}{_THINK_JSON_OUTPUT_CONTRACT}"
 
 
+def _resolve_dynamic_system_prompt_override() -> str | None:
+    """Load dynamic system prompt override when dispatcher selects a persona."""
+    prompt_path = str(os.getenv("CERBERUS_DYNAMIC_PERSONA_PROMPT_PATH", "") or "").strip()
+    if not prompt_path:
+        return None
+    try:
+        return load_prompt_template(prompt_path)
+    except Exception:
+        return None
+
+
 def create_system_prompt_renderer(base_instructions: str) -> Callable[..., str]:
     """Return a renderer that applies contextual variables to prompt templates.
 
@@ -438,7 +449,9 @@ def create_system_prompt_renderer(base_instructions: str) -> Callable[..., str]:
     renderer that returns the raw prompt string, optionally applying Python
     ``.format()`` substitutions if keyword arguments are provided.
     """
-    enriched_instructions = _with_think_json_contract(base_instructions)
+    dynamic_override = _resolve_dynamic_system_prompt_override()
+    effective_instructions = dynamic_override if dynamic_override else base_instructions
+    enriched_instructions = _with_think_json_contract(effective_instructions)
 
     if Template is not None:
         try:

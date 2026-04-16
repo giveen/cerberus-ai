@@ -22,17 +22,24 @@ Security Phases:
 
 from __future__ import annotations
 
+from enum import Enum
 import importlib
 import inspect
 import json
 import os
+import re
 import shutil
 import sys
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel, Field, ValidationError
+from cerberus.tools.tool_graph import (
+    ToolGraph,
+    ToolNode,
+    activate_tool_subgraph as graph_activate_tool_subgraph,
+    build_tool_graph,
+)
 
 # Framework dependencies
 try:
@@ -45,6 +52,31 @@ try:
     from cerberus.memory.logic import clean
 except ImportError:
     clean = lambda x: x
+
+
+def _is_truthy_env(value: str) -> bool:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return False
+    if raw.isdigit():
+        return int(raw) > 0
+    return raw in {"1", "true", "yes", "on", "debug", "verbose"}
+
+
+def _jit_debug_enabled() -> bool:
+    """Return True when JIT trace output is enabled.
+
+    CERBERUS_JIT_DEBUG takes precedence. CERBERUS_DEBUG is used as fallback.
+    """
+    explicit = os.getenv("CERBERUS_JIT_DEBUG")
+    if explicit is not None:
+        return _is_truthy_env(explicit)
+    return _is_truthy_env(os.getenv("CERBERUS_DEBUG", ""))
+
+
+def _jit_trace(message: str) -> None:
+    if _jit_debug_enabled():
+        print(f"[JIT] {message}")
 
 
 # =============================================================================
@@ -380,6 +412,13 @@ TOOL_CATALOG = {
         "dependencies": [],
         "description": "Export cross-agent handoff memo from a checkpoint",
     },
+    "request_toolbox": {
+        "module": "cerberus.tools.sessions",
+        "name": "request_toolbox",
+        "phase": PHASE_META,
+        "dependencies": [],
+        "description": "Persist requested toolbox category for next turn tool routing",
+    },
     "validate_json_schema": {
         "module": "cerberus.tools.validation",
         "name": "validate_json_schema",
@@ -445,6 +484,17 @@ TOOL_CATALOG = {
     },
 }
 
+TOOL_GRAPH: ToolGraph = build_tool_graph(TOOL_CATALOG)
+
+
+# Explicit core tools injected into every execution plan.
+CORE_TOOL_INJECTION = {
+    "reasoning": "read_key_findings",
+    "workspace": "list_assets",
+    "routing": "request_toolbox",
+}
+CORE_TOOL_NAMES = list(CORE_TOOL_INJECTION.values())
+
 
 # =============================================================================
 # Data Models
@@ -461,6 +511,9 @@ class ToolMetadata(BaseModel):
     )
     module: str = Field(
         ..., description="Module path where tool is defined", min_length=1
+    )
+    category: str = Field(
+        ..., description="Top-level tool category derived from metadata graph"
     )
     phase: str = Field(
         ...,
@@ -480,6 +533,50 @@ class ToolMetadata(BaseModel):
         frozen = True
 
 
+class ResolutionResult(BaseModel):
+    """Deterministic category resolution with explicit scoring output."""
+
+    primary_category: str = Field(..., min_length=1)
+    secondary_categories: List[str] = Field(default_factory=list)
+    confidence_scores: Dict[str, float] = Field(default_factory=dict)
+    fallback_reason: Optional[str] = None
+
+    class Config:
+        frozen = True
+
+
+class ToolResolutionState(str, Enum):
+    SUCCESS = "SUCCESS"
+    DEGRADED = "DEGRADED"
+    FAILED = "FAILED"
+
+
+class ToolResolutionResult(BaseModel):
+    """Explicit stateful tool activation result for one category request."""
+
+    state: ToolResolutionState
+    requested_category: str
+    resolved_category: str
+    tools: List[Any] = Field(default_factory=list)
+    unavailable_tools: List[str] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class ExecutionPlan(BaseModel):
+    """Deterministic pre-LLM execution plan for tool selection."""
+
+    resolved_category: str
+    tool_nodes: List[ToolNode] = Field(default_factory=list)
+    resolution_state: ToolResolutionState
+    reasoning_trace: List[str] = Field(default_factory=list)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
 class ToolRegistry(BaseModel):
     """Response model for tool registry queries."""
 
@@ -488,6 +585,9 @@ class ToolRegistry(BaseModel):
     disabled_tools: int = Field(..., description="Disabled tools")
     phase_breakdown: Dict[str, int] = Field(
         ..., description="Tool count per security phase"
+    )
+    category_breakdown: Dict[str, int] = Field(
+        default_factory=dict, description="Tool count per graph-derived category"
     )
     tools: List[ToolMetadata] = Field(default_factory=list, description="Tool metadata")
 
@@ -557,6 +657,531 @@ def _check_env_requirements(requires_env: List[str]) -> bool:
     return all(os.getenv(var) for var in requires_env)
 
 
+def _existing_tool_categories() -> Set[str]:
+    """Return categories from metadata graph (no filesystem scan)."""
+    return set(TOOL_GRAPH.categories.keys())
+
+
+def get_existing_tool_categories() -> List[str]:
+    """Return sorted list of top-level tool categories discovered under tools/."""
+    return sorted(_existing_tool_categories())
+
+
+def get_global_tool_names() -> List[str]:
+    """Compatibility alias for explicit core tools injected into plans."""
+    return list(CORE_TOOL_NAMES)
+
+
+def _resolve_loaded_tool_name(tool: Any) -> str:
+    """Best-effort resolver for loaded tool callable/object names."""
+    if hasattr(tool, "name"):
+        value = getattr(tool, "name")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    if hasattr(tool, "__name__"):
+        value = getattr(tool, "__name__")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return type(tool).__name__
+
+
+def _dedupe_loaded_tools_by_name(tools: List[Any]) -> List[Any]:
+    """Deduplicate loaded tools by resolved name while preserving order."""
+    seen: Set[str] = set()
+    deduped: List[Any] = []
+    for tool in tools:
+        name = _resolve_loaded_tool_name(tool)
+        if name in seen:
+            continue
+        seen.add(name)
+        deduped.append(tool)
+    return deduped
+
+
+def get_global_tools() -> List[Any]:
+    """Lazy-load and return globally available tool callables."""
+    loaded, _ = get_global_tools_with_status()
+    return loaded
+
+
+def get_global_tools_with_status() -> tuple[List[Any], List[str]]:
+    """Load explicit core tools and return (loaded, unavailable_tool_names)."""
+    loaded: List[Any] = []
+    unavailable: List[str] = []
+    for tool_name in CORE_TOOL_NAMES:
+        try:
+            loaded.append(TOOL_REGISTRY.get_tool_by_name(tool_name))
+        except Exception as exc:
+            unavailable.append(tool_name)
+            if get_cerberus_logger:
+                try:
+                    logger = get_cerberus_logger()
+                    if logger:
+                        logger.action(
+                            "Global tool unavailable during resolution",
+                            data={"tool_name": tool_name, "error": str(exc)},
+                            tags=["warning", "tool_unavailable"],
+                        )
+                except Exception:
+                    pass
+    return _dedupe_loaded_tools_by_name(loaded), sorted(set(unavailable))
+
+
+def merge_with_global_tools(category_tools: List[Any]) -> List[Any]:
+    """Merge category tools with global tools and dedupe by name.
+
+    This helper no longer performs implicit fallback behavior. If category tools
+    are empty, callers must use explicit stateful resolution via
+    `resolve_tools_for_category`.
+    """
+    deduped_category_tools = _dedupe_loaded_tools_by_name(list(category_tools))
+    global_tools, unavailable_globals = get_global_tools_with_status()
+
+    if not deduped_category_tools:
+        raise RuntimeError(
+            "Category tools are empty; implicit GLOBAL_TOOLS substitution is disabled. "
+            "Use resolve_tools_for_category for explicit SUCCESS/DEGRADED/FAILED state handling."
+        )
+
+    merged = deduped_category_tools + global_tools
+    merged = _dedupe_loaded_tools_by_name(merged)
+    if not merged:
+        detail = (
+            f"unavailable_global_tools={','.join(unavailable_globals)}"
+            if unavailable_globals
+            else "unavailable_global_tools=none"
+        )
+        raise RuntimeError(
+            "Critical tool resolution failure: merged category/global tool set is empty "
+            f"({detail})"
+        )
+    return merged
+
+
+def inject_core_tools(plan: ExecutionPlan) -> ExecutionPlan:
+    """Inject required core tools into the plan with explicit trace output.
+
+    Required injections:
+    - reasoning tool
+    - workspace tool
+    - request_toolbox routing tool
+    """
+    existing_nodes = list(plan.tool_nodes)
+    reasoning_trace = list(plan.reasoning_trace)
+
+    nodes_by_name: Dict[str, ToolNode] = {
+        node.name: node for node in TOOL_GRAPH.nodes_by_key.values()
+    }
+    metadata_key_by_identity: Dict[str, str] = {
+        f"{meta.category}:{meta.name}": key for key, meta in TOOL_REGISTRY._metadata.items()
+    }
+
+    seen_tool_ids: Set[str] = {f"{node.category}:{node.name}" for node in existing_nodes}
+    unavailable_core_tools: List[str] = []
+    injected_core_tools: List[str] = []
+
+    for role, tool_name in CORE_TOOL_INJECTION.items():
+        node = nodes_by_name.get(tool_name)
+        if node is None:
+            unavailable_core_tools.append(f"{role}:{tool_name}:missing_graph_node")
+            continue
+
+        tool_id = f"{node.category}:{node.name}"
+        if tool_id in seen_tool_ids:
+            injected_core_tools.append(tool_name)
+            continue
+
+        metadata_key = metadata_key_by_identity.get(tool_id)
+        if metadata_key is None:
+            unavailable_core_tools.append(f"{role}:{tool_name}:missing_registry_metadata")
+            continue
+
+        meta = TOOL_REGISTRY._metadata.get(metadata_key)
+        if meta is None or not meta.enabled:
+            unavailable_core_tools.append(f"{role}:{tool_name}:disabled")
+            continue
+
+        try:
+            TOOL_REGISTRY._load_tool(metadata_key)
+        except ValueError:
+            unavailable_core_tools.append(f"{role}:{tool_name}:load_failed")
+            continue
+
+        existing_nodes.append(node)
+        seen_tool_ids.add(tool_id)
+        injected_core_tools.append(tool_name)
+
+    state = plan.resolution_state
+    if unavailable_core_tools and state == ToolResolutionState.SUCCESS:
+        state = ToolResolutionState.DEGRADED
+
+    if existing_nodes and state == ToolResolutionState.FAILED:
+        state = ToolResolutionState.DEGRADED
+
+    if not existing_nodes:
+        state = ToolResolutionState.FAILED
+
+    reasoning_trace.append(
+        "core_injection="
+        f"requested:{','.join(CORE_TOOL_NAMES)} "
+        f"injected:{','.join(sorted(set(injected_core_tools))) or 'none'} "
+        f"unavailable:{','.join(sorted(set(unavailable_core_tools))) or 'none'}"
+    )
+
+    return plan.model_copy(
+        update={
+            "tool_nodes": existing_nodes,
+            "resolution_state": state,
+            "reasoning_trace": reasoning_trace,
+        }
+    )
+
+
+def validate_execution_plan(plan: ExecutionPlan) -> ExecutionPlan:
+    """Validate plan nodes against tool graph identity registry.
+
+    Validation is deterministic and machine-traceable:
+    - every node must exist in TOOL_GRAPH
+    - no duplicate tool identities in plan
+    """
+    reasoning_trace = list(plan.reasoning_trace)
+    validated_nodes: List[ToolNode] = []
+    invalid_nodes: List[str] = []
+    duplicate_nodes: List[str] = []
+    seen_ids: Set[str] = set()
+
+    for node in plan.tool_nodes:
+        tool_id = f"{node.category}:{node.name}"
+        if tool_id in seen_ids:
+            duplicate_nodes.append(tool_id)
+            continue
+        seen_ids.add(tool_id)
+
+        graph_node = TOOL_GRAPH.nodes_by_id.get(tool_id)
+        if graph_node is None:
+            invalid_nodes.append(tool_id)
+            continue
+        validated_nodes.append(node)
+
+    state = plan.resolution_state
+    if (invalid_nodes or duplicate_nodes) and state == ToolResolutionState.SUCCESS:
+        state = ToolResolutionState.DEGRADED
+
+    if not validated_nodes:
+        state = ToolResolutionState.FAILED
+
+    reasoning_trace.append(
+        "plan_graph_validation="
+        f"validated:{len(validated_nodes)} "
+        f"invalid:{','.join(invalid_nodes) or 'none'} "
+        f"duplicates:{','.join(duplicate_nodes) or 'none'}"
+    )
+
+    return plan.model_copy(
+        update={
+            "tool_nodes": validated_nodes,
+            "resolution_state": state,
+            "reasoning_trace": reasoning_trace,
+        }
+    )
+
+
+CATEGORY_SCORING_RULES: Dict[str, Dict[str, float]] = {
+    "reconnaissance": {
+        "scan": 2.0,
+        "nmap": 3.0,
+        "port": 2.0,
+        "enumerate": 1.5,
+        "shodan": 2.5,
+        "ldap": 1.5,
+        "netcat": 1.5,
+    },
+    "web": {
+        "http": 2.0,
+        "endpoint": 2.0,
+        "headers": 2.0,
+        "javascript": 1.5,
+        "web": 1.0,
+        "url": 1.5,
+    },
+    "command_and_control": {
+        "c2": 3.0,
+        "beacon": 2.5,
+        "reverse shell": 3.0,
+        "ssh": 1.5,
+        "command and control": 3.0,
+    },
+    "exploitation": {
+        "exploit": 2.5,
+        "vulnerability": 2.0,
+        "payload": 2.0,
+        "shellcode": 2.5,
+    },
+    "lateral_movement": {
+        "pivot": 2.0,
+        "lateral": 2.0,
+        "movement": 1.0,
+        "remote": 1.0,
+    },
+    "privilege_scalation": {
+        "privesc": 3.0,
+        "sudo": 2.0,
+        "root": 2.0,
+        "escalate": 2.0,
+    },
+}
+
+
+def resolve_category(prompt: str) -> ResolutionResult:
+    """Resolve prompt -> category with deterministic scoring and explicit rationale."""
+    available_categories = sorted(_existing_tool_categories())
+    normalized = (prompt or "").strip().lower()
+    tokens = set(re.findall(r"[a-z0-9_]+", normalized))
+
+    if not available_categories:
+        return ResolutionResult(
+            primary_category="misc",
+            secondary_categories=[],
+            confidence_scores={"misc": 1.0},
+            fallback_reason="no_categories",
+        )
+
+    raw_scores: Dict[str, float] = {category: 0.0 for category in available_categories}
+    for category in available_categories:
+        rules = CATEGORY_SCORING_RULES.get(category, {})
+        score = 0.0
+        for keyword, weight in rules.items():
+            keyword_norm = str(keyword).strip().lower()
+            if not keyword_norm:
+                continue
+            if " " in keyword_norm:
+                if keyword_norm in normalized:
+                    score += float(weight)
+            elif keyword_norm in tokens:
+                score += float(weight)
+        raw_scores[category] = score
+
+    max_raw_score = max(raw_scores.values()) if raw_scores else 0.0
+    confidence_scores: Dict[str, float] = {
+        category: (raw_scores[category] / max_raw_score if max_raw_score > 0 else 0.0)
+        for category in sorted(raw_scores.keys())
+    }
+
+    ranked_categories = sorted(
+        confidence_scores.items(),
+        key=lambda item: (-item[1], item[0]),
+    )
+
+    threshold = 0.25
+    fallback_reason: Optional[str] = None
+    if not ranked_categories:
+        primary_category = "misc"
+        confidence_scores.setdefault(primary_category, 1.0)
+        fallback_reason = "no_scores"
+    elif ranked_categories[0][1] < threshold:
+        if "misc" in confidence_scores:
+            primary_category = "misc"
+            fallback_reason = "low_confidence"
+        else:
+            primary_category = ranked_categories[0][0]
+            fallback_reason = "low_confidence_misc_unavailable"
+    else:
+        primary_category = ranked_categories[0][0]
+
+    confidence_scores.setdefault(primary_category, 0.0)
+    secondary_categories = [
+        category
+        for category, score in ranked_categories
+        if category != primary_category and score > 0
+    ]
+
+    return ResolutionResult(
+        primary_category=primary_category,
+        secondary_categories=secondary_categories,
+        confidence_scores=confidence_scores,
+        fallback_reason=fallback_reason,
+    )
+
+
+def _build_execution_plan_for_category(
+    requested_category: str,
+    *,
+    trace: Optional[List[str]] = None,
+) -> ExecutionPlan:
+    """Build deterministic execution plan for a requested category token."""
+    reasoning_trace = list(trace or [])
+    available_categories = set(get_existing_tool_categories())
+    resolved_category = str(requested_category or "").strip()
+    resolution_state = ToolResolutionState.SUCCESS
+
+    reasoning_trace.append(f"requested_category={resolved_category or '<empty>'}")
+
+    if not resolved_category:
+        resolution_state = ToolResolutionState.DEGRADED
+        reasoning_trace.append("category_normalized=empty_category")
+        resolved_category = "misc" if "misc" in available_categories else ""
+
+    if resolved_category and resolved_category not in available_categories:
+        resolution_state = ToolResolutionState.DEGRADED
+        reasoning_trace.append(f"category_normalized=invalid_category:{resolved_category}")
+        if "misc" in available_categories:
+            resolved_category = "misc"
+        elif available_categories:
+            resolved_category = sorted(available_categories)[0]
+        else:
+            resolved_category = ""
+
+    if not resolved_category:
+        reasoning_trace.append("plan_state=FAILED reason=no_categories_available")
+        return ExecutionPlan(
+            resolved_category="",
+            tool_nodes=[],
+            resolution_state=ToolResolutionState.FAILED,
+            reasoning_trace=reasoning_trace,
+        )
+
+    # Step 2: deterministic category subgraph activation from metadata graph.
+    subgraph_nodes = list(graph_activate_tool_subgraph(TOOL_GRAPH, resolved_category))
+    reasoning_trace.append(
+        f"subgraph_activation=category:{resolved_category} node_count:{len(subgraph_nodes)}"
+    )
+
+    metadata_key_by_identity: Dict[str, str] = {
+        f"{meta.category}:{meta.name}": key for key, meta in TOOL_REGISTRY._metadata.items()
+    }
+    selected_nodes: List[ToolNode] = []
+    unavailable_tools: List[str] = []
+    seen_tool_ids: Set[str] = set()
+
+    def _append_if_available(node: ToolNode) -> None:
+        tool_id = f"{node.category}:{node.name}"
+        if tool_id in seen_tool_ids:
+            return
+
+        metadata_key = metadata_key_by_identity.get(tool_id)
+        if metadata_key is None:
+            unavailable_tools.append(node.name)
+            return
+
+        meta = TOOL_REGISTRY._metadata.get(metadata_key)
+        if meta is None or not meta.enabled:
+            unavailable_tools.append(node.name)
+            return
+
+        try:
+            TOOL_REGISTRY._load_tool(metadata_key)
+        except ValueError:
+            unavailable_tools.append(node.name)
+            return
+
+        seen_tool_ids.add(tool_id)
+        selected_nodes.append(node)
+
+    # Step 3: validate tool availability for category subgraph nodes.
+    for node in subgraph_nodes:
+        _append_if_available(node)
+
+    unavailable_tools = sorted(set(unavailable_tools))
+    if unavailable_tools and resolution_state == ToolResolutionState.SUCCESS:
+        resolution_state = ToolResolutionState.DEGRADED
+
+    if not selected_nodes:
+        resolution_state = ToolResolutionState.FAILED
+        reasoning_trace.append("availability_check=FAILED reason=no_tools_available")
+    else:
+        reasoning_trace.append(
+            f"availability_check=selected:{len(selected_nodes)} unavailable:{len(unavailable_tools)}"
+        )
+
+    reasoning_trace.append(f"plan_state={resolution_state.value}")
+
+    # Step 4: emit final deterministic execution plan.
+    return ExecutionPlan(
+        resolved_category=resolved_category,
+        tool_nodes=selected_nodes,
+        resolution_state=resolution_state,
+        reasoning_trace=reasoning_trace,
+    )
+
+
+def build_execution_plan(prompt: str) -> ExecutionPlan:
+    """Deterministically build pre-LLM execution plan from prompt text.
+
+    Pipeline:
+    1) resolve_category(prompt)
+    2) activate_tool_subgraph(resolved_category)
+    3) validate tool availability
+    4) emit ExecutionPlan
+    """
+    resolution = resolve_category(prompt)
+    ranked_scores = sorted(
+        resolution.confidence_scores.items(),
+        key=lambda item: (-item[1], item[0]),
+    )
+    score_preview = ",".join(f"{category}={score:.3f}" for category, score in ranked_scores)
+    trace = [
+        f"resolve_category=primary:{resolution.primary_category}",
+        f"resolve_scores={score_preview}",
+    ]
+    if resolution.fallback_reason:
+        trace.append(f"resolve_fallback={resolution.fallback_reason}")
+
+    return _build_execution_plan_for_category(resolution.primary_category, trace=trace)
+
+
+def build_execution_plan_for_category(category: str) -> ExecutionPlan:
+    """Build deterministic pre-LLM execution plan from an explicit category."""
+    normalized_category = str(category or "").strip()
+    trace = [f"category_override={normalized_category or '<empty>'}"]
+    return _build_execution_plan_for_category(normalized_category, trace=trace)
+
+
+def resolve_tools_for_category(category: str) -> ToolResolutionResult:
+    """Resolve tools for category with explicit SUCCESS/DEGRADED/FAILED state."""
+    requested_category = str(category or "").strip()
+    plan = _build_execution_plan_for_category(requested_category)
+    plan = validate_execution_plan(plan)
+    plan = inject_core_tools(plan)
+
+    loaded_tools: List[Any] = []
+    unavailable_tools: List[str] = []
+    metadata_key_by_identity: Dict[str, str] = {
+        f"{meta.category}:{meta.name}": key
+        for key, meta in TOOL_REGISTRY._metadata.items()
+    }
+
+    for node in plan.tool_nodes:
+        tool_id = f"{node.category}:{node.name}"
+        metadata_key = metadata_key_by_identity.get(tool_id)
+        if metadata_key is None:
+            unavailable_tools.append(node.name)
+            continue
+        try:
+            loaded_tools.append(TOOL_REGISTRY._load_tool(metadata_key))
+        except ValueError:
+            unavailable_tools.append(node.name)
+
+    reason: Optional[str] = None
+    if plan.resolution_state == ToolResolutionState.FAILED:
+        reason = "no_tools_available"
+    elif plan.resolution_state == ToolResolutionState.DEGRADED:
+        reason = "tool_unavailable_or_category_normalized"
+
+    return ToolResolutionResult(
+        state=plan.resolution_state,
+        requested_category=requested_category,
+        resolved_category=plan.resolved_category,
+        tools=_dedupe_loaded_tools_by_name(loaded_tools),
+        unavailable_tools=sorted(set(unavailable_tools)),
+        reason=reason,
+    )
+
+
+def detect_intent(prompt: str) -> str:
+    """Compatibility wrapper returning only the primary scored category."""
+    return resolve_category(prompt).primary_category
+
+
 # =============================================================================
 # Tool Discovery & Loader Engine
 # =============================================================================
@@ -581,8 +1206,13 @@ class CerberusToolRegistry:
 
         self._initialized = True
         self._logger = get_cerberus_logger() if get_cerberus_logger else None
+        self._tool_graph: ToolGraph = TOOL_GRAPH
         self._metadata: Dict[str, ToolMetadata] = {}
         self._instances: Dict[str, Any] = {}
+        self._module_cache: Dict[str, Any] = {}
+        self._tools_by_category: Dict[str, List[ToolMetadata]] = {}
+        self._category_instances_cache: Dict[str, List[Any]] = {}
+        self._category_unavailable_cache: Dict[str, List[str]] = {}
         self._discovery_time = datetime.utcnow().isoformat()
 
         self._discover_tools()
@@ -590,51 +1220,77 @@ class CerberusToolRegistry:
 
     def _discover_tools(self) -> None:
         """Scan and validate all tools in the catalog."""
-        for tool_key, tool_info in TOOL_CATALOG.items():
+        self._tools_by_category = {}
+        self._category_instances_cache = {}
+        self._category_unavailable_cache = {}
+
+        def _record_tool(meta: ToolMetadata) -> None:
+            bucket = self._tools_by_category.setdefault(meta.category, [])
+            bucket.append(meta)
+
+        for tool_key, node in self._tool_graph.nodes_by_key.items():
             try:
-                requires_env = tool_info.get("requires_env", [])
+                phase_value = str(node.metadata.get("phase") or "").strip()
+                if not phase_value:
+                    raise KeyError("phase")
+
+                requires_env_raw = node.metadata.get("requires_env", [])
+                requires_env = [
+                    str(value)
+                    for value in requires_env_raw
+                    if isinstance(value, str) and value.strip()
+                ] if isinstance(requires_env_raw, list) else []
+
                 if not _check_env_requirements(requires_env):
                     disabled_reason = (
                         f"Missing environment variable(s): {', '.join(requires_env)}"
                     )
-                    self._metadata[tool_key] = ToolMetadata(
-                        name=tool_info["name"],
-                        module=tool_info["module"],
-                        phase=tool_info["phase"],
-                        dependencies=tool_info.get("dependencies", []),
-                        description=tool_info.get("description", ""),
+                    metadata = ToolMetadata(
+                        name=node.name,
+                        module=node.module_path,
+                        category=node.category,
+                        phase=phase_value,
+                        dependencies=list(node.dependencies),
+                        description=str(node.metadata.get("description", "") or ""),
                         enabled=False,
                         disabled_reason=disabled_reason,
                         requires_env=requires_env,
                     )
+                    self._metadata[tool_key] = metadata
+                    _record_tool(metadata)
                     continue
 
-                dependencies = tool_info.get("dependencies", [])
+                dependencies = list(node.dependencies)
                 missing_deps = [d for d in dependencies if not _check_dependency(d)]
 
                 if missing_deps:
                     disabled_reason = f"Missing dependencies: {', '.join(missing_deps)}"
-                    self._metadata[tool_key] = ToolMetadata(
-                        name=tool_info["name"],
-                        module=tool_info["module"],
-                        phase=tool_info["phase"],
+                    metadata = ToolMetadata(
+                        name=node.name,
+                        module=node.module_path,
+                        category=node.category,
+                        phase=phase_value,
                         dependencies=dependencies,
-                        description=tool_info.get("description", ""),
+                        description=str(node.metadata.get("description", "") or ""),
                         enabled=False,
                         disabled_reason=disabled_reason,
-                        requires_env=tool_info.get("requires_env", []),
+                        requires_env=requires_env,
                     )
                 else:
-                    self._metadata[tool_key] = ToolMetadata(
-                        name=tool_info["name"],
-                        module=tool_info["module"],
-                        phase=tool_info["phase"],
+                    metadata = ToolMetadata(
+                        name=node.name,
+                        module=node.module_path,
+                        category=node.category,
+                        phase=phase_value,
                         dependencies=dependencies,
-                        description=tool_info.get("description", ""),
+                        description=str(node.metadata.get("description", "") or ""),
                         enabled=True,
                         disabled_reason=None,
-                        requires_env=tool_info.get("requires_env", []),
+                        requires_env=requires_env,
                     )
+
+                self._metadata[tool_key] = metadata
+                _record_tool(metadata)
             except (ValidationError, KeyError) as e:
                 if self._logger:
                     try:
@@ -684,7 +1340,12 @@ class CerberusToolRegistry:
             raise ValueError(f"Tool is disabled: {tool_key}")
 
         try:
-            module = importlib.import_module(metadata.module)
+            module_path = metadata.module
+            module = self._module_cache.get(module_path)
+            if module is None:
+                _jit_trace(f"Importing tool module: {module_path}")
+                module = importlib.import_module(module_path)
+                self._module_cache[module_path] = module
             tool_func = getattr(module, metadata.name)
             self._instances[tool_key] = tool_func
             if self._logger:
@@ -696,7 +1357,7 @@ class CerberusToolRegistry:
                 except Exception:
                     pass
             return tool_func
-        except (ImportError, AttributeError, SyntaxError) as e:
+        except Exception as e:
             self._metadata[tool_key] = metadata.copy(
                 update={"enabled": False, "disabled_reason": f"Load failed: {str(e)}"}
             )
@@ -717,17 +1378,23 @@ class CerberusToolRegistry:
         return self._discovery_time
 
     def get_tool_by_name(self, tool_name: str) -> Any:
-        """Get a tool by name (lazy-loaded)."""
-        tool_key = None
-        for key, meta in self._metadata.items():
+        """Get a tool by name via category JIT loading path."""
+        target_meta: Optional[ToolMetadata] = None
+        for meta in self._metadata.values():
             if meta.name == tool_name:
-                tool_key = key
+                target_meta = meta
                 break
 
-        if tool_key is None:
+        if target_meta is None:
             raise ValueError(f"Tool not found: {tool_name}")
 
-        return self._load_tool(tool_key)
+        loaded_category_tools = self.get_tools_by_category(target_meta.category)
+        for tool in loaded_category_tools:
+            resolved_name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
+            if str(resolved_name).strip() == tool_name:
+                return tool
+
+        raise ValueError(f"Tool '{tool_name}' is unavailable in category '{target_meta.category}'")
 
     def get_tools_for_agent(self, agent_role: str) -> List[ToolMetadata]:
         """Get available tools that an agent can use based on their role."""
@@ -749,6 +1416,88 @@ class CerberusToolRegistry:
 
         tools = [meta for meta in self._metadata.values() if meta.phase == phase and meta.enabled]
         return sorted(tools, key=lambda t: t.name)
+
+    def get_tools_by_category(self, category: str) -> List[Any]:
+        """Lazily load tools for one category only and cache the result list."""
+        loaded_tools, _ = self.get_tools_by_category_with_status(category)
+        return loaded_tools
+
+    def get_tools_by_category_with_status(self, category: str) -> tuple[List[Any], List[str]]:
+        """Lazily load tools for category and return (loaded, unavailable_tool_names)."""
+        if category in self._category_instances_cache:
+            _jit_trace(
+                f"Category cache hit: {category} ({len(self._category_instances_cache[category])} tools)"
+            )
+            return (
+                self._category_instances_cache[category],
+                self._category_unavailable_cache.get(category, []),
+            )
+
+        _jit_trace(f"Category cache miss: {category}")
+
+        loaded_tools: List[Any] = []
+        unavailable_tools: List[str] = []
+        activated_nodes = graph_activate_tool_subgraph(self._tool_graph, category)
+        for node in activated_nodes:
+            tool_key = next(
+                (
+                    key
+                    for key, item in self._metadata.items()
+                    if item.name == node.name and item.module == node.module_path
+                ),
+                None,
+            )
+            if tool_key is None:
+                unavailable_tools.append(node.name)
+                continue
+            meta = self._metadata.get(tool_key)
+            if meta is None or not meta.enabled:
+                unavailable_tools.append(node.name)
+                continue
+            try:
+                loaded_tools.append(self._load_tool(tool_key))
+            except ValueError:
+                unavailable_tools.append(node.name)
+                continue
+
+        self._category_instances_cache[category] = loaded_tools
+        self._category_unavailable_cache[category] = sorted(set(unavailable_tools))
+        _jit_trace(f"Category cached: {category} ({len(loaded_tools)} tools)")
+        return loaded_tools, self._category_unavailable_cache[category]
+
+    def get_tool_metadata_by_category(
+        self, category: str, agent_role: Optional[str] = None
+    ) -> List[ToolMetadata]:
+        """Get tool metadata by derived category without importing tool modules."""
+        tools = [
+            meta
+            for meta in self._tools_by_category.get(category, [])
+            if meta.enabled
+            and (
+                agent_role is None
+                or ToolAuthorizationManager.is_phase_allowed(agent_role, meta.phase)
+            )
+        ]
+        return sorted(tools, key=lambda t: (t.phase, t.name))
+
+    def get_tools_grouped_by_category(
+        self, agent_role: Optional[str] = None
+    ) -> Dict[str, List[ToolMetadata]]:
+        """Return enabled tools grouped by derived filesystem category."""
+        grouped: Dict[str, List[ToolMetadata]] = {}
+        for category, metas in self._tools_by_category.items():
+            eligible = [
+                meta
+                for meta in metas
+                if meta.enabled
+                and (
+                    agent_role is None
+                    or ToolAuthorizationManager.is_phase_allowed(agent_role, meta.phase)
+                )
+            ]
+            if eligible:
+                grouped[category] = sorted(eligible, key=lambda t: (t.phase, t.name))
+        return dict(sorted(grouped.items(), key=lambda item: item[0]))
 
     def get_all_tools(self) -> List[ToolMetadata]:
         """Get all enabled tools in the registry."""
@@ -772,11 +1521,16 @@ class CerberusToolRegistry:
             if count > 0:
                 phase_breakdown[phase] = count
 
+        category_breakdown: Dict[str, int] = {}
+        for meta in enabled_tools:
+            category_breakdown[meta.category] = category_breakdown.get(meta.category, 0) + 1
+
         return ToolRegistry(
             total_tools=len(self._metadata),
             available_tools=len(enabled_tools),
             disabled_tools=len(disabled_tools),
             phase_breakdown=phase_breakdown,
+            category_breakdown=dict(sorted(category_breakdown.items(), key=lambda item: item[0])),
             tools=enabled_tools,
         )
 
@@ -787,6 +1541,8 @@ class CerberusToolRegistry:
                 self._metadata[key] = meta.copy(
                     update={"enabled": False, "disabled_reason": reason}
                 )
+                self._category_instances_cache.pop(meta.category, None)
+                self._category_unavailable_cache.pop(meta.category, None)
                 return True
         return False
 
@@ -797,6 +1553,8 @@ class CerberusToolRegistry:
                 self._metadata[key] = meta.copy(
                     update={"enabled": True, "disabled_reason": None}
                 )
+                self._category_instances_cache.pop(meta.category, None)
+                self._category_unavailable_cache.pop(meta.category, None)
                 return True
         return False
 
@@ -811,6 +1569,16 @@ TOOL_REGISTRY = CerberusToolRegistry()
 def get_tool_registry() -> CerberusToolRegistry:
     """Get the global tool registry singleton."""
     return TOOL_REGISTRY
+
+
+def get_tool_graph() -> ToolGraph:
+    """Get the deterministic metadata-only tool graph."""
+    return TOOL_GRAPH
+
+
+def activate_tool_subgraph(category: str) -> List[ToolNode]:
+    """Activate a deterministic category subgraph from metadata graph."""
+    return list(graph_activate_tool_subgraph(TOOL_GRAPH, category))
 
 
 def get_all_tools() -> List[ToolMetadata]:
@@ -836,5 +1604,25 @@ def get_registry_status() -> Dict[str, Any]:
         "available_tools": status.available_tools,
         "disabled_tools": status.disabled_tools,
         "phase_breakdown": status.phase_breakdown,
+        "category_breakdown": status.category_breakdown,
         "discovery_time": TOOL_REGISTRY.discovery_time,
     }
+
+
+def get_tools_by_category(category: str) -> List[Any]:
+    """Get lazily-loaded tools for one graph-activated category."""
+    return TOOL_REGISTRY.get_tools_by_category(category)
+
+
+def get_tool_metadata_by_category(
+    category: str, agent_role: Optional[str] = None
+) -> List[ToolMetadata]:
+    """Get metadata for tools in a category without importing tool modules."""
+    return TOOL_REGISTRY.get_tool_metadata_by_category(category, agent_role=agent_role)
+
+
+def get_tools_grouped_by_category(
+    agent_role: Optional[str] = None,
+) -> Dict[str, List[ToolMetadata]]:
+    """Get enabled tools grouped by graph-derived categories."""
+    return TOOL_REGISTRY.get_tools_grouped_by_category(agent_role=agent_role)

@@ -52,6 +52,7 @@ from cerberus.sdk.agents.run_context import RunContextWrapper
 from cerberus.sdk.agents.tool import FunctionTool
 from cerberus.tools.all_tools import get_tool_registry
 from cerberus.tools.reconnaissance.filesystem import PathGuard
+from cerberus.persona_runtime import build_default_persona_registry
 from cerberus.utils.process_handler import (
     run_streaming_subprocess,
     streaming_runtime,
@@ -78,10 +79,13 @@ _PROMPT_DISPATCH_GLOBAL_AGENT_LEGACY_ENV = "CEREBRO_AGENT_TYPE"
 _PROMPT_DISPATCH_PYTHON_ENV = "CERBERUS_HEADLESS_PYTHON"
 _PROMPT_DISPATCH_PYTHON_LEGACY_ENV = "CEREBRO_HEADLESS_PYTHON"
 _PROMPT_DISPATCH_SOURCE_ROOT_ENV = "CERBERUS_SOURCE_ROOT"
+_PROMPT_DISPATCH_PERSONA_NAME_ENV = "CERBERUS_DYNAMIC_PERSONA_NAME"
+_PROMPT_DISPATCH_PERSONA_PROMPT_PATH_ENV = "CERBERUS_DYNAMIC_PERSONA_PROMPT_PATH"
 _PROMPT_DISPATCH_MAX_RETRIES = 3
 _RETRYABLE_PROMPT_ERROR_PATTERNS = [
     "failed to parse tool call arguments as json",
     "tool_arguments_missing_required_fields",
+    "critical parse error",
 ]
 
 
@@ -90,8 +94,14 @@ def _is_retryable_prompt_failure(message: str) -> bool:
     lower = message.lower()
     return any(pat in lower for pat in _RETRYABLE_PROMPT_ERROR_PATTERNS)
 _PROMPT_DISPATCH_SOURCE_ROOT_LEGACY_ENV = "CEREBRO_SOURCE_ROOT"
-_PROMPT_DISPATCH_AGENT_FALLBACK = "assistant"
+_PROMPT_DISPATCH_AGENT_FALLBACK = "one_tool"
 _PROMPT_DISPATCH_CONTAINER_PYTHON = "/opt/cerberus-venv/bin/python"
+_PERSONA_REGISTRY = build_default_persona_registry()
+_PROMPT_DISPATCH_AGENT_ALIASES = {
+    "assistant": "one_tool",
+    "default": "one_tool",
+    "one_tool_agent": "one_tool",
+}
 
 
 def _emit_headless_message(message: str, *, error: bool = False) -> None:
@@ -267,8 +277,15 @@ def _resolve_prompt_dispatch_agent() -> str:
     ):
         value = str(os.getenv(env_key, "") or "").strip()
         if value:
-            return value
+            return _normalize_prompt_dispatch_agent(value)
     return _PROMPT_DISPATCH_AGENT_FALLBACK
+
+
+def _normalize_prompt_dispatch_agent(value: str) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not normalized:
+        return _PROMPT_DISPATCH_AGENT_FALLBACK
+    return _PROMPT_DISPATCH_AGENT_ALIASES.get(normalized, normalized)
 
 
 def _resolve_prompt_dispatch_python(env: Mapping[str, str], *, active_container: str) -> str:
@@ -335,7 +352,9 @@ async def _invoke_streamable_tool(
         if workspaces_root is None:
             workspaces_root = resolve_headless_workspaces_root(project_root)
 
-        prompt_agent = _resolve_prompt_dispatch_agent()
+        requested_agent = str(arguments.get("agent", "") or "").strip()
+        prompt_agent = _normalize_prompt_dispatch_agent(requested_agent or _resolve_prompt_dispatch_agent())
+        persona_selection = _PERSONA_REGISTRY.select_for_input(prompt)
 
         env = os.environ.copy()
         active_container = str(env.get("CERBERUS_ACTIVE_CONTAINER") or env.get("CEREBRO_ACTIVE_CONTAINER") or "").strip()
@@ -357,6 +376,8 @@ async def _invoke_streamable_tool(
                 "CERBERUS_WORKSPACE": project_root.name,
                 "WORKSPACE_ROOT": str(project_root),
                 "CIR_WORKSPACE": str(project_root),
+                _PROMPT_DISPATCH_PERSONA_NAME_ENV: persona_selection.name,
+                _PROMPT_DISPATCH_PERSONA_PROMPT_PATH_ENV: str(persona_selection.prompt_file),
             }
         )
         if active_container:
@@ -378,6 +399,22 @@ async def _invoke_streamable_tool(
             "run",
             prompt,
         ]
+
+        if persona_selection.sleep_command:
+            await _emit_headless_log(
+                log_emitter,
+                channel="status",
+                message="Persona sleep command received; dispatcher reset to master template.",
+            )
+        elif persona_selection.explicit_match:
+            await _emit_headless_log(
+                log_emitter,
+                channel="status",
+                message=(
+                    f"Persona switched to '{persona_selection.name}' "
+                    f"({persona_selection.prompt_path})."
+                ),
+            )
 
         last_failure: dict[str, Any] | None = None
         for _attempt in range(_PROMPT_DISPATCH_MAX_RETRIES):

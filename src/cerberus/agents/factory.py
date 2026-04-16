@@ -534,16 +534,63 @@ class CerebroAgentFactory:
 
         renderer = create_system_prompt_renderer(template_text)
         hydrated = renderer(**metadata)
+        target_ip = str(metadata.get("target_ip", "") or "").strip()
+        if self._should_include_target_hint(target_ip=target_ip, metadata=metadata):
+            return f"# Session Metadata\n- target_ip: {target_ip}\n\n{hydrated}"
+        return hydrated
 
-        header_lines = [
-            "# Session Metadata",
-            f"- user_name: {metadata.get('user_name', 'unknown')}",
-            f"- target_ip: {metadata.get('target_ip', 'unknown')}",
-            f"- project_id: {metadata.get('project_id', 'unknown')}",
-            f"- session_uuid: {metadata.get('session_uuid', 'unknown')}",
-            "",
-        ]
-        return "\n".join(header_lines) + hydrated
+    @staticmethod
+    def _iter_metadata_strings(value: Any) -> Iterable[str]:
+        if value is None:
+            return
+        if isinstance(value, str):
+            candidate = value.strip()
+            if candidate:
+                yield candidate
+            return
+        if isinstance(value, Mapping):
+            for nested in value.values():
+                yield from CerebroAgentFactory._iter_metadata_strings(nested)
+            return
+        if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray, str)):
+            for nested in value:
+                yield from CerebroAgentFactory._iter_metadata_strings(nested)
+
+    @classmethod
+    def _metadata_mentions_target_ip(cls, metadata: Mapping[str, Any], target_ip: str) -> bool:
+        normalized_target = target_ip.strip()
+        if not normalized_target:
+            return False
+
+        probe_fields: list[Any] = []
+        for key in (
+            "initial_user_message",
+            "initial_message",
+            "user_prompt",
+            "prompt",
+            "input",
+            "original_input",
+            "conversation_input",
+            "messages",
+        ):
+            if key in metadata:
+                probe_fields.append(metadata[key])
+
+        if not probe_fields:
+            probe_fields.append(metadata)
+
+        for candidate in probe_fields:
+            for text in cls._iter_metadata_strings(candidate):
+                if normalized_target in text:
+                    return True
+        return False
+
+    @classmethod
+    def _should_include_target_hint(cls, *, target_ip: str, metadata: Mapping[str, Any]) -> bool:
+        normalized = target_ip.strip().lower()
+        if not normalized or normalized in {"unknown", "unset", "none", "n/a", "na"}:
+            return False
+        return not cls._metadata_mentions_target_ip(metadata, target_ip)
 
     def _compose_metadata(
         self,
@@ -561,9 +608,10 @@ class CerebroAgentFactory:
             "project_id": project_id or os.getenv("CERBERUS_PROJECT_ID") or "unknown",
             "session_uuid": agent_uuid,
             "role": role,
-            "workspace_root": str(self._workspace_paths.repo_root),
-            "active_workspace": str(self._workspace_paths.active_workspace),
-            "timestamp_utc": datetime.now(tz=UTC).isoformat(),
+            # Keep compatibility placeholders without leaking environment fingerprints.
+            "workspace_root": "",
+            "active_workspace": "",
+            "timestamp_utc": "",
         }
         if metadata:
             payload.update(dict(metadata))

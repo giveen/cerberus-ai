@@ -19,6 +19,7 @@ Design goals for Cerebro session checkpoints:
 from __future__ import annotations
 
 import base64
+import contextvars
 import hashlib
 import json
 import os
@@ -34,7 +35,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
 
 import fcntl
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -83,6 +84,251 @@ FRIENDLY_SESSION_MAP: Dict[str, str] = {}
 REVERSE_SESSION_MAP: Dict[str, str] = {}
 SESSION_COUNTER = 0
 SESSION_OUTPUT_COUNTER: Dict[str, int] = {}
+
+TOOLBOX_SESSION_LOCK = threading.Lock()
+_CURRENT_TOOLBOX_SESSION_ID: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "cerberus_toolbox_session_id",
+    default="default",
+)
+_CURRENT_TOOLBOX_SESSION_ID_FALLBACK = "default"
+
+if TYPE_CHECKING:
+    from cerberus.tools.all_tools import ExecutionPlan, ToolResolutionState
+
+
+def _get_tool_runtime_models() -> tuple[type["ExecutionPlan"], type["ToolResolutionState"]]:
+    from cerberus.tools.all_tools import ExecutionPlan, ToolResolutionState
+
+    return ExecutionPlan, ToolResolutionState
+
+
+def _default_tool_resolution_state() -> "ToolResolutionState":
+    _, tool_resolution_state = _get_tool_runtime_models()
+    return tool_resolution_state.FAILED
+
+
+def _default_execution_plan() -> "ExecutionPlan":
+    execution_plan_cls, tool_resolution_state = _get_tool_runtime_models()
+    return execution_plan_cls(
+        resolved_category="",
+        tool_nodes=[],
+        resolution_state=tool_resolution_state.FAILED,
+        reasoning_trace=["tool_state_initialized"],
+    )
+
+
+_UNSET = object()
+
+
+class ToolboxToolState(BaseModel):
+    """Structured tool runtime state for a single logical session."""
+
+    active_category: Optional[str] = None
+    resolution_state: "ToolResolutionState" = Field(default_factory=_default_tool_resolution_state)
+    last_execution_plan: "ExecutionPlan" = Field(default_factory=_default_execution_plan)
+
+
+class ToolSnapshot(BaseModel):
+    """Deterministic snapshot of tool-selection state for one request."""
+
+    timestamp: str = Field(min_length=1)
+    prompt: str = ""
+    resolved_category: str = ""
+    tool_list: List[str] = Field(default_factory=list)
+    execution_plan_hash: str = Field(min_length=1)
+
+
+class ToolboxSessionState(BaseModel):
+    """Per-session toolbox routing preferences used by request pipeline."""
+
+    session_id: str = Field(min_length=1)
+    tool_state: ToolboxToolState = Field(default_factory=ToolboxToolState)
+    tool_history: List[ToolSnapshot] = Field(default_factory=list)
+
+
+def _rebuild_tool_state_models() -> None:
+    """Resolve forward references for typed toolbox tool-state models."""
+    try:
+        execution_plan_cls, tool_resolution_state = _get_tool_runtime_models()
+        ToolboxToolState.model_rebuild(
+            _types_namespace={
+                "ExecutionPlan": execution_plan_cls,
+                "ToolResolutionState": tool_resolution_state,
+            }
+        )
+        ToolboxSessionState.model_rebuild(
+            _types_namespace={
+                "ToolboxToolState": ToolboxToolState,
+                "ToolSnapshot": ToolSnapshot,
+                "ExecutionPlan": execution_plan_cls,
+                "ToolResolutionState": tool_resolution_state,
+            }
+        )
+    except Exception:
+        pass
+
+
+_rebuild_tool_state_models()
+
+
+TOOLBOX_SESSIONS: Dict[str, ToolboxSessionState] = {}
+
+
+def _normalize_toolbox_session_id(session_id: Optional[str]) -> str:
+    raw = str(session_id or "").strip()
+    return raw if raw else "default"
+
+
+def _extract_toolbox_session_id_from_context(run_context: Any = None) -> str:
+    if run_context is None:
+        return "default"
+
+    existing = str(getattr(run_context, "toolbox_session_id", "") or "").strip()
+    if existing:
+        return _normalize_toolbox_session_id(existing)
+
+    context_obj = getattr(run_context, "context", None)
+    candidate: Optional[str] = None
+    if isinstance(context_obj, dict):
+        candidate = str(context_obj.get("session_id") or context_obj.get("id") or "").strip() or None
+    elif context_obj is not None:
+        candidate = str(getattr(context_obj, "session_id", "") or "").strip() or None
+
+    resolved = _normalize_toolbox_session_id(candidate)
+    try:
+        setattr(run_context, "toolbox_session_id", resolved)
+    except Exception:
+        pass
+    return resolved
+
+
+def get_or_create_toolbox_session(session_id: Optional[str] = None) -> ToolboxSessionState:
+    resolved = _normalize_toolbox_session_id(session_id)
+    with TOOLBOX_SESSION_LOCK:
+        existing = TOOLBOX_SESSIONS.get(resolved)
+        if existing is not None:
+            return existing
+        created = ToolboxSessionState(session_id=resolved)
+        TOOLBOX_SESSIONS[resolved] = created
+        return created
+
+
+def set_toolbox_active_category(
+    session_id: str,
+    active_category: Optional[str],
+) -> ToolboxSessionState:
+    resolved = _normalize_toolbox_session_id(session_id)
+    with TOOLBOX_SESSION_LOCK:
+        current = TOOLBOX_SESSIONS.get(resolved) or ToolboxSessionState(session_id=resolved)
+        updated_tool_state = current.tool_state.model_copy(update={"active_category": active_category})
+        updated = current.model_copy(update={"tool_state": updated_tool_state})
+        TOOLBOX_SESSIONS[resolved] = updated
+        return updated
+
+
+def set_toolbox_tool_state(
+    session_id: str,
+    *,
+    active_category: Any = _UNSET,
+    resolution_state: Optional["ToolResolutionState"] = None,
+    last_execution_plan: Optional["ExecutionPlan"] = None,
+) -> ToolboxSessionState:
+    """Apply explicit, typed tool-state transitions for a session."""
+    resolved = _normalize_toolbox_session_id(session_id)
+    with TOOLBOX_SESSION_LOCK:
+        current = TOOLBOX_SESSIONS.get(resolved) or ToolboxSessionState(session_id=resolved)
+        updates: Dict[str, Any] = {}
+        if active_category is not _UNSET:
+            updates["active_category"] = active_category
+        if resolution_state is not None:
+            updates["resolution_state"] = resolution_state
+        if last_execution_plan is not None:
+            updates["last_execution_plan"] = last_execution_plan
+
+        updated_tool_state = (
+            current.tool_state.model_copy(update=updates)
+            if updates
+            else current.tool_state
+        )
+        updated = current.model_copy(update={"tool_state": updated_tool_state})
+        TOOLBOX_SESSIONS[resolved] = updated
+        return updated
+
+
+def get_toolbox_tool_state(session_id: Optional[str]) -> ToolboxToolState:
+    state = get_or_create_toolbox_session(session_id)
+    return state.tool_state
+
+
+def append_toolbox_tool_snapshot(
+    session_id: str,
+    *,
+    prompt: str,
+    resolved_category: str,
+    tool_list: List[str],
+    execution_plan: "ExecutionPlan",
+) -> ToolSnapshot:
+    """Append one structured tool-selection snapshot to session history."""
+    resolved = _normalize_toolbox_session_id(session_id)
+
+    plan_payload = execution_plan.model_dump(mode="json")
+    plan_hash = hashlib.sha256(
+        json.dumps(plan_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+    snapshot = ToolSnapshot(
+        timestamp=datetime.now(UTC).isoformat(),
+        prompt=str(prompt or ""),
+        resolved_category=str(resolved_category or ""),
+        tool_list=list(tool_list),
+        execution_plan_hash=plan_hash,
+    )
+
+    with TOOLBOX_SESSION_LOCK:
+        current = TOOLBOX_SESSIONS.get(resolved) or ToolboxSessionState(session_id=resolved)
+        updated_history = [*current.tool_history, snapshot]
+        updated = current.model_copy(update={"tool_history": updated_history})
+        TOOLBOX_SESSIONS[resolved] = updated
+
+    return snapshot
+
+
+def get_toolbox_tool_history(session_id: Optional[str]) -> List[ToolSnapshot]:
+    state = get_or_create_toolbox_session(session_id)
+    return list(state.tool_history)
+
+
+def get_toolbox_active_category(session_id: Optional[str]) -> Optional[str]:
+    state = get_or_create_toolbox_session(session_id)
+    return state.tool_state.active_category
+
+
+def set_run_context_toolbox_session_id(run_context: Any, session_id: Optional[str] = None) -> str:
+    resolved = _normalize_toolbox_session_id(session_id)
+    if resolved == "default":
+        resolved = _extract_toolbox_session_id_from_context(run_context)
+    try:
+        setattr(run_context, "toolbox_session_id", resolved)
+    except Exception:
+        pass
+    get_or_create_toolbox_session(resolved)
+    return resolved
+
+
+def set_current_toolbox_session_id(session_id: Optional[str]) -> str:
+    global _CURRENT_TOOLBOX_SESSION_ID_FALLBACK
+    resolved = _normalize_toolbox_session_id(session_id)
+    _CURRENT_TOOLBOX_SESSION_ID_FALLBACK = resolved
+    _CURRENT_TOOLBOX_SESSION_ID.set(resolved)
+    get_or_create_toolbox_session(resolved)
+    return resolved
+
+
+def get_current_toolbox_session_id() -> str:
+    from_context = _normalize_toolbox_session_id(_CURRENT_TOOLBOX_SESSION_ID.get())
+    if from_context != "default":
+        return from_context
+    return _normalize_toolbox_session_id(_CURRENT_TOOLBOX_SESSION_ID_FALLBACK)
 
 
 class ShellSession:  # pylint: disable=too-many-instance-attributes
@@ -1181,6 +1427,49 @@ def session_export(checkpoint_id: str, target_agent_role: str) -> Dict[str, Any]
     return SESSION_TOOL.session_export(checkpoint_id=checkpoint_id, target_agent_role=target_agent_role)
 
 
+@_function_tool(strict_mode=False)
+def request_toolbox(category_name: str) -> Dict[str, Any]:
+    """Persist a toolbox category selection to apply on the next model turn."""
+    requested = str(category_name or "").strip().lower()
+    session_id = get_current_toolbox_session_id()
+
+    if not requested:
+        return {
+            "ok": False,
+            "error": {
+                "code": "missing_toolbox_category",
+                "category": "validation",
+                "message": "category_name is required.",
+            },
+            "session_id": session_id,
+        }
+
+    from cerberus.tools.all_tools import get_existing_tool_categories
+
+    valid_categories = get_existing_tool_categories()
+    if requested not in valid_categories:
+        return {
+            "ok": False,
+            "error": {
+                "code": "invalid_toolbox_category",
+                "category": "validation",
+                "message": f"Unknown toolbox category: {requested}",
+                "valid_categories": valid_categories,
+            },
+            "session_id": session_id,
+        }
+
+    previous = get_toolbox_active_category(session_id)
+    state = set_toolbox_active_category(session_id, requested)
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "active_category": state.tool_state.active_category,
+        "previous_category": previous,
+        "applies_on": "next_turn",
+    }
+
+
 # =============================================================================
 # Legacy shell session compatibility functions
 # =============================================================================
@@ -1342,6 +1631,20 @@ __all__ = [
     "session_resume",
     "session_list",
     "session_export",
+    "request_toolbox",
+    "ToolboxToolState",
+    "ToolSnapshot",
+    "ToolboxSessionState",
+    "get_or_create_toolbox_session",
+    "set_toolbox_active_category",
+    "set_toolbox_tool_state",
+    "get_toolbox_active_category",
+    "get_toolbox_tool_state",
+    "append_toolbox_tool_snapshot",
+    "get_toolbox_tool_history",
+    "set_run_context_toolbox_session_id",
+    "set_current_toolbox_session_id",
+    "get_current_toolbox_session_id",
     "SessionCheckpoint",
     "SemanticState",
     "HandoffMemo",

@@ -27,8 +27,8 @@ _VALID_PORT_STATES = ("open", "closed", "filtered", "unfiltered", "open|filtered
 
 @pytest.fixture
 def patch_dashboard_agents(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CERBERUS_DASHBOARD_PROMPT_AGENT", "assistant")
-    monkeypatch.setenv("CEREBRO_DASHBOARD_PROMPT_AGENT", "assistant")
+    monkeypatch.setenv("CERBERUS_DASHBOARD_PROMPT_AGENT", "one_tool")
+    monkeypatch.setenv("CEREBRO_DASHBOARD_PROMPT_AGENT", "one_tool")
 
 
 def _live_scan_enabled() -> bool:
@@ -169,7 +169,8 @@ async def test_dashboard_prompt_live_scan_port_1024_returns_results(patch_dashbo
         f"Captured runtime logs:\n{_render_runtime_events(runtime_events)}"
     )
 
-    action = AgentDashboardState._parse_prompt_to_action(_DASHBOARD_SCAN_PROMPT)
+    parse_action = getattr(AgentDashboardState, "_parse_prompt_to_action")
+    action = parse_action(_DASHBOARD_SCAN_PROMPT)
     assert action["tool_name"] == "run_supervised_prompt"
 
     result = None

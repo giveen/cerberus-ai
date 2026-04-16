@@ -68,14 +68,14 @@ def test_prompt_output_parser_refuses_meta_only_fallback_output() -> None:
     assert _extract_prompt_response_from_lines(lines, fallback_to_plain_text=True) == ""
 
 
-def test_prompt_response_sanitizer_hides_internal_reasoning_and_committing_json() -> None:
+def test_prompt_response_sanitizer_keeps_committing_json_response_text() -> None:
     content = (
         "The error is clear now - the policy engine is complaining about BALANCED.\n\n"
         "Response\n\n"
         "COMMITTING_JSON: {\"tool_name\": \"nmap\", \"arguments\": {\"target\": \"192.168.0.4\"}}"
     )
 
-    assert _sanitize_prompt_response_text(content) == ""
+    assert _sanitize_prompt_response_text(content) == content
 
 
 def test_prompt_response_sanitizer_hides_raw_model_request_payload() -> None:
