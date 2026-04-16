@@ -567,7 +567,7 @@ def _build_one_tool_agent() -> Agent:
     model=OpenAIChatCompletionsModel(
       model=get_effective_model(),
       openai_client=AsyncOpenAI(
-        api_key=get_effective_api_key(default="sk-placeholder-key-for-local-models"),
+        api_key=get_effective_api_key(),
         base_url=get_effective_api_base(),
       ),
       agent_name="CTF agent",

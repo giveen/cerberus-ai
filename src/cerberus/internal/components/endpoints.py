@@ -1,5 +1,5 @@
 """
-Cerebro High-Concurrency Dispatcher (CHCD)
+Cerberus High-Concurrency Dispatcher (CHCD)
 
 Replaces the legacy endpoints.py stub with a production-grade asynchronous
 endpoint manager for the Cerberus AI suite.
@@ -10,12 +10,12 @@ Responsibilities
   local llama.cpp, and any additional failover endpoints.
 * Background health-check loop that measures p95 latency and triggers automatic
   failover when a primary endpoint exceeds the configured threshold.
-* Token-flow prioritisation that integrates with the Cerebro Cognitive Load
+* Token-flow prioritisation that integrates with the Cerberus Cognitive Load
   Balancer (CCLB) to serve "emergency" requests ahead of "background" ones.
 * In-process LRU response cache (256 GB-aware) to avoid redundant round-trips
   for repeated tool/initialization payloads.
-* Structured, redacted telemetry logging to /workspace/internal/traffic.log
-  via PathGuard-backed CerebroFileWriter.
+* Structured, redacted local audit logging to /workspace/internal/traffic.log
+    via a PathGuard-backed writer.
 * MODE_CRITIQUE hook: on HTTP 429 / 5xx the dispatcher emits a Network Critique
   to the agent with back-off guidance.
 
@@ -202,7 +202,7 @@ class _CHCDPathGuardViolation(PermissionError):
 
 
 class _TelemetryWriter:
-    """Append-only telemetry log writer scoped to /workspace/internal/."""
+    """Append-only local audit log writer scoped to /workspace/internal/."""
 
     def __init__(self, workspace_root: Path) -> None:
         self.workspace_root = workspace_root.resolve()
@@ -738,7 +738,7 @@ cerebro_endpoint_manager = CerberusEndpointManager()
 # ---------------------------------------------------------------------------
 
 def process(suffix: Optional[str] = None) -> None:  # noqa: D401
-    """Telemetry uploads are disabled (legacy stub; CHCD manages all I/O)."""
+    """Outbound telemetry uploads are disabled (legacy local-audit stub)."""
     return None
 
 

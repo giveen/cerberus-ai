@@ -28,13 +28,15 @@ from ..tracing import SpanError, response_span
 from ..usage import Usage
 from .interface import Model, ModelTracing
 from cerberus.util.config import get_effective_api_base, get_effective_api_key
+from cerberus.internal.debug_logger import get_debug_logger
 
 if TYPE_CHECKING:
     from ..model_settings import ModelSettings
 
 
-_USER_AGENT = "Cerberus AI Auditor"
+_USER_AGENT = "Cerberus-AI"
 _HEADERS = {"User-Agent": _USER_AGENT}
+_RUNTIME_DEBUG_LOGGER = get_debug_logger()
 
 # From the Responses API
 IncludeLiteral = Literal[
@@ -152,7 +154,11 @@ class OpenAIResponsesModel(Model):
                             title=getattr(self, "agent_name", "Agent"),
                         )
                     except TypeError as exc:
-                        logger.debug("TRACE_DEBUG: cli_print_agent_messages fallback: %s", exc)
+                        _RUNTIME_DEBUG_LOGGER.write(
+                            channel="trace_debug",
+                            message="cli_print_agent_messages_fallback",
+                            payload={"error": str(exc), "phase": "responses_get_response"},
+                        )
                         print("[assistant] tool-use intent emitted")
                     
                     # Update token totals
@@ -251,7 +257,11 @@ class OpenAIResponsesModel(Model):
                             title=getattr(self, "agent_name", "Agent"),
                         )
                     except TypeError as exc:
-                        logger.debug("TRACE_DEBUG: cli_print_agent_messages fallback: %s", exc)
+                        _RUNTIME_DEBUG_LOGGER.write(
+                            channel="trace_debug",
+                            message="cli_print_agent_messages_fallback",
+                            payload={"error": str(exc), "phase": "responses_stream_response"},
+                        )
                         print("[assistant] tool-use intent emitted")
                     
                     # Update token totals

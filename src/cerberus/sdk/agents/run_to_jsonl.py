@@ -7,6 +7,7 @@ from datetime import datetime
 import json
 import getpass
 import platform
+from pathlib import Path
 import pytz  # pylint: disable=import-error
 import uuid  # Add uuid import
 from cerberus.util import get_active_time, get_idle_time, safe_duration_to_float
@@ -64,8 +65,8 @@ class DataRecorder:  # pylint: disable=too-few-public-methods
         self._last_message_logged = False
         self._session_end_logged = False
 
-        log_dir = 'logs'
-        os.makedirs(log_dir, exist_ok=True)
+        log_path = Path('logs')
+        log_path.mkdir(parents=True, exist_ok=True)
 
         # Get current username
         try:
@@ -90,11 +91,9 @@ class DataRecorder:  # pylint: disable=too-few-public-methods
         base_filename = f'cerberus_{self.session_id}_{timestamp}_{username}_{os_info}_{public_ip.replace(".", "_")}.jsonl'
 
         if workspace_name:
-            self.filename = os.path.join(
-                log_dir, f'{workspace_name}_{base_filename}'
-            )
+            self.filename = log_path / f'{workspace_name}_{base_filename}'
         else:
-            self.filename = os.path.join(log_dir, base_filename)
+            self.filename = log_path / base_filename
 
         # Inicializar el coste total acumulado
         self.total_cost = 0.0

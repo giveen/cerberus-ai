@@ -473,7 +473,7 @@ flag_discriminator = Agent(
     ),
     model=OpenAIChatCompletionsModel(
         model=os.getenv("CERBERUS_MODEL", "cerebro1"),
-        openai_client=AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", "sk-placeholder-key-for-local-models")),
+        openai_client=AsyncOpenAI(api_key=os.getenv("CERBERUS_API_KEY", os.getenv("OPENAI_API_KEY", ""))),
     ),
     tools=[],
 )

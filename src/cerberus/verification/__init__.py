@@ -5,6 +5,7 @@ from .policy_engine import (
     PolicyFinding,
     PolicyReport,
     format_logic_audit_report,
+    is_path_contained,
     render_logic_audit_report_markdown,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "PolicyFinding",
     "PolicyReport",
     "format_logic_audit_report",
+    "is_path_contained",
     "render_logic_audit_report_markdown",
 ]

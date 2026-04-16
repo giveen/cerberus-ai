@@ -39,6 +39,7 @@ from cerberus.tools.reconnaissance.filesystem import PathGuard
 from cerberus.agents.subghz_sdr_agent import CerebroFileWriter
 from cerberus.tools.all_tools import get_all_tools, get_tool
 from cerberus.agents.one_tool import CerebroAtomicRunner
+from cerberus.util.config import get_effective_api_key
 
 try:
     from cerberus.memory.memory_vault import CSEM  # type: ignore
@@ -444,6 +445,9 @@ except ImportError:
 
 # Initialize Engine
 cost_engine = CerberusOpenTransfer()
+api_key = get_effective_api_key(default="")
+if not api_key:
+    raise ValueError("No API key configured. Please set CERBERUS_API_KEY or use the local config.")
 
 # Build tools list from registry
 _tools = []
@@ -465,7 +469,7 @@ cost_agent = Agent(
     model=OpenAIChatCompletionsModel(
         model=os.getenv("CERBERUS_MODEL", "cerebro1"),
         openai_client=AsyncOpenAI(
-            api_key=os.getenv("CERBERUS_API_KEY", os.getenv("OPENAI_API_KEY", "sk-placeholder"))
+            api_key=api_key
         ),
     )
 )

@@ -33,42 +33,6 @@ _RTX_5090_VRAM_WORKING_SET_MB = 28_672
 _RTX_5090_VRAM_RESERVE_MB = 4_096
 
 
-def _is_local_provider_configured() -> bool:
-    """Return True when environment indicates a local LLM provider."""
-    model_value = get_effective_model(default="").strip().lower()
-    local_prefixes = (
-        "ollama",
-        "litellm",
-        "llama",
-        "llama.cpp",
-        "vllm",
-        "local",
-        "deepseek",
-    )
-    if any(model_value.startswith(prefix) for prefix in local_prefixes):
-        return True
-
-    local_env_markers = (
-        "LITELLM_SERVER",
-        "LITELLM_BASE_URL",
-        "OLLAMA_URL",
-        "OLLAMA_API_BASE",
-        "OLLAMA_BASE_URL",
-        "CERBERUS_LOCAL_MODEL",
-        "LLM_LOCAL",
-        "LLAMA_CPP_SERVER",
-    )
-    return any(bool(os.getenv(key, "").strip()) for key in local_env_markers)
-
-
-def should_suppress_openai_api_key_warning() -> bool:
-    """Suppress OPENAI_API_KEY warning in transparent local-provider mode."""
-    audit_mode = os.getenv("AUDIT_MODE", os.getenv("CERBERUS_AUDIT_MODE", "TRANSPARENT"))
-    if str(audit_mode).strip().upper() != "TRANSPARENT":
-        return False
-    return _is_local_provider_configured()
-
-
 def _first_configured_env(*keys: str) -> str:
     """Return the first non-empty environment value from the provided keys."""
     for key in keys:
@@ -132,7 +96,7 @@ def get_effective_api_base(default: str = "http://localhost:8000/v1") -> str:
     )
 
 
-def get_effective_api_key(default: str = "sk-cerberus-1234567890") -> str:
+def get_effective_api_key(default: str = "") -> str:
     """Return API key honoring Cerberus and legacy local-provider configuration."""
     return (
         _first_configured_env(
@@ -315,7 +279,7 @@ class CerberusConfig(BaseSettings):
 
     audit_mode: Literal["TRANSPARENT"] = "TRANSPARENT"
     encryption_enabled: bool = False
-    telemetry_enabled: bool = True
+    telemetry_enabled: bool = False
     log_level: str = Field(default="INFO", validation_alias=AliasChoices("CERBERUS_LOG_LEVEL", "LOG_LEVEL"))
 
     @model_validator(mode="after")
@@ -431,5 +395,4 @@ __all__ = [
     "PathHierarchy",
     "RamSegmentation",
     "get_cerberus_config",
-    "should_suppress_openai_api_key_warning",
 ]

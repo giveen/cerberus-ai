@@ -507,7 +507,7 @@ class CerebroValidationAgent:
 
 
 load_dotenv()
-_api_key = os.getenv("CERBERUS_API_KEY", os.getenv("OPENAI_API_KEY", "sk-cerebro-1234567890"))
+_api_key = os.getenv("CERBERUS_API_KEY", os.getenv("OPENAI_API_KEY", ""))
 _prompt = load_prompt_template("prompts/system_triage_agent.md")
 
 _tools: List[Any] = []

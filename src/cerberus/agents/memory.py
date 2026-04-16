@@ -88,7 +88,7 @@ from cerberus.tools.misc.rag import add_to_memory_semantic, add_to_memory_episod
 
 # Get model from environment or use default
 model_name = os.getenv('CERBERUS_MODEL', "cerebro1")
-api_key = os.getenv("CERBERUS_API_KEY", os.getenv("OPENAI_API_KEY", "sk-cerebro-1234567890"))
+api_key = os.getenv("CERBERUS_API_KEY", os.getenv("OPENAI_API_KEY", ""))
 
 
 def get_previous_memory(query: str) -> str:

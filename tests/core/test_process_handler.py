@@ -7,6 +7,7 @@ import sys
 
 import pytest
 
+import cerberus.utils.process_handler as process_handler
 from cerberus.utils.process_handler import has_active_processes, run_streaming_subprocess, streaming_runtime, terminate_session_task
 from cerberus.utils.process_handler import StreamedSubprocessResult, _run_streaming_container_exec
 
@@ -174,3 +175,68 @@ async def test_run_streaming_container_exec_forwards_runtime_env_to_docker_exec(
         "OPENAI_API_KEY": "sk-local",
         "WORKSPACE_ROOT": "/workspace/workspaces/dashboard-agent-1",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="preexec_fn=os.setsid is only used on POSIX")
+async def test_run_streaming_subprocess_uses_setsid_preexec(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured_kwargs: dict[str, object] = {}
+    monkeypatch.delenv("CERBERUS_ACTIVE_CONTAINER", raising=False)
+    monkeypatch.delenv("CEREBRO_ACTIVE_CONTAINER", raising=False)
+
+    class _FakeProcess:
+        pid = 4242
+        returncode: int | None = 0
+
+        def __init__(self) -> None:
+            self.stdout = asyncio.StreamReader()
+            self.stderr = asyncio.StreamReader()
+            self.stdout.feed_eof()
+            self.stderr.feed_eof()
+
+        async def wait(self) -> int:
+            self.returncode = 0
+            return 0
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+
+    result = await run_streaming_subprocess(
+        argv=[sys.executable, "-c", "print('ok')"],
+        cwd=tmp_path,
+        timeout_seconds=5,
+    )
+
+    assert result.exit_code == 0
+    assert captured_kwargs.get("preexec_fn") is os.setsid
+
+
+@pytest.mark.asyncio
+async def test_terminate_all_session_tasks_fans_out_to_each_registered_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        process_handler,
+        "_PROCESS_REGISTRY",
+        {
+            "sess-a": {},
+            "sess-b": {},
+        },
+    )
+
+    calls: list[tuple[str, float]] = []
+
+    async def _fake_terminate_session_task(session_id: str, *, grace_seconds: float = 2.0):
+        calls.append((session_id, grace_seconds))
+        return {"terminated": 1, "killed": 1, "found": 1, "pids": [123]}
+
+    monkeypatch.setattr(process_handler, "terminate_session_task", _fake_terminate_session_task)
+
+    summary = await process_handler.terminate_all_session_tasks(grace_seconds=3.0)
+
+    assert sorted(calls) == [("sess-a", 3.0), ("sess-b", 3.0)]
+    assert summary["found_sessions"] == 2
+    assert summary["terminated"] == 2
+    assert summary["killed"] == 2
+    assert summary["found"] == 2

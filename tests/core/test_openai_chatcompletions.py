@@ -365,3 +365,44 @@ async def test_interaction_counter_single_turn_with_tool_calls(monkeypatch) -> N
     
     # Counter should now be 2 (one increment per turn, not per item)
     assert model.interaction_counter == 2
+
+
+def test_detect_and_format_tool_use_preserves_structured_input() -> None:
+    class DummyClient:
+        def __init__(self) -> None:
+            self.chat = type("_Chat", (), {"completions": object()})()
+            self.base_url = httpx.URL("http://fake")
+
+    model = OpenAIChatCompletionsModel(model=cai_model, openai_client=DummyClient())  # type: ignore[arg-type]
+    delta = {
+        "tool_use": {
+            "id": "tool-1",
+            "name": "nmap",
+            "input": {"target": "192.168.0.4", "args": "-p 80", "timeout": 45},
+        }
+    }
+
+    tool_calls = model._detect_and_format_function_calls(delta)
+    assert isinstance(tool_calls, list)
+    assert len(tool_calls) == 1
+    assert tool_calls[0]["function"]["name"] == "nmap"
+    assert (
+        tool_calls[0]["function"]["arguments"]
+        == '{"target":"192.168.0.4","args":"-p 80","timeout":45}'
+    )
+
+
+def test_detect_and_format_tool_use_without_input_does_not_inject_empty_object() -> None:
+    class DummyClient:
+        def __init__(self) -> None:
+            self.chat = type("_Chat", (), {"completions": object()})()
+            self.base_url = httpx.URL("http://fake")
+
+    model = OpenAIChatCompletionsModel(model=cai_model, openai_client=DummyClient())  # type: ignore[arg-type]
+    delta = {"tool_use": {"id": "tool-2", "name": "nmap"}}
+
+    tool_calls = model._detect_and_format_function_calls(delta)
+    assert isinstance(tool_calls, list)
+    assert len(tool_calls) == 1
+    assert tool_calls[0]["function"]["name"] == "nmap"
+    assert tool_calls[0]["function"]["arguments"] == ""

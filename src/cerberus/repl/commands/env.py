@@ -405,7 +405,16 @@ class EnvironmentAuditor:
 
         # Snapshot directory writable
         out_dir = self.report_dir()
-        writable = os.access(out_dir, os.W_OK) if out_dir.exists() else os.access(out_dir.parent, os.W_OK)
+        def _is_writable(path: Path) -> bool:
+            target = path if path.exists() else path.parent
+            try:
+                probe = target / ".cerberus_write_probe"
+                probe.touch()
+                probe.unlink(missing_ok=True)
+                return True
+            except OSError:
+                return False
+        writable = _is_writable(out_dir)
         results.append(
             AuditCheck(
                 name="snapshot_directory",

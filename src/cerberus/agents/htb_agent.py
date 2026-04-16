@@ -368,7 +368,7 @@ class CerberusLabOperativeAgent:
 
 load_dotenv()
 model_name = os.getenv("CERBERUS_MODEL", "cerebro1")
-api_key = os.getenv("CERBERUS_API_KEY", os.getenv("OPENAI_API_KEY", "sk-cerebro-1234567890"))
+api_key = os.getenv("CERBERUS_API_KEY", os.getenv("OPENAI_API_KEY", ""))
 
 htb_agent_system_prompt = load_prompt_template("prompts/system_htb_agent.md")
 

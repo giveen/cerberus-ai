@@ -467,6 +467,35 @@ def function_tool(
                 # If sanitizer fails for any reason, continue with original json_data
                 pass
 
+            # Fail loudly when malformed non-empty payload collapses to an empty object
+            # for tools that require arguments. This avoids silently dispatching {}.
+            required_fields = _required_fields_from_schema(schema.params_json_schema)
+            input_stripped = input.strip() if isinstance(input, str) else ""
+            if (
+                required_fields
+                and isinstance(json_data, dict)
+                and not json_data
+                and input_stripped
+                and input_stripped != "{}"
+            ):
+                schema_hint = _build_schema_retry_hint(
+                    schema.name,
+                    schema.params_json_schema,
+                ).get("suggested_arguments_json", "{}")
+                error_msg = (
+                    f"Malformed JSON input for tool {schema.name}: parsed arguments collapsed to empty object. "
+                    f"Required fields: {', '.join(required_fields)}. "
+                    f"Retry with JSON like: {schema_hint}."
+                )
+                if _debug.DONT_LOG_TOOL_DATA:
+                    logger.debug(
+                        "Malformed JSON input collapsed to empty object for tool %s",
+                        schema.name,
+                    )
+                else:
+                    logger.debug("%s Raw input: %s", error_msg, input)
+                raise ModelBehaviorError(error_msg)
+
             if _debug.DONT_LOG_TOOL_DATA:
                 logger.debug(f"Invoking tool {schema.name}")
             else:

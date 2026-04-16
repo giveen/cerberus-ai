@@ -413,6 +413,63 @@ def test_tool_call_conversion(converter):
     assert tool_call["function"]["arguments"] == function_call["arguments"]
 
 
+def test_history_assistant_tool_calls_preserve_none_or_omitted_arguments(converter):
+    """History replay should not coerce missing/malformed args into '{}' strings."""
+    items: list[TResponseInputItem] = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_none",
+                    "type": "function",
+                    "function": {"name": "nmap", "arguments": None},
+                },
+                {
+                    "id": "call_missing",
+                    "type": "function",
+                    "function": {"name": "nmap_no_args"},
+                },
+                {
+                    "id": "call_empty",
+                    "type": "function",
+                    "function": {"name": "nmap_empty", "arguments": ""},
+                },
+            ],
+        }
+    ]
+
+    messages = converter.items_to_messages(items)
+    assert len(messages) == 1
+    assistant = messages[0]
+    tool_calls = assistant.get("tool_calls")
+    assert isinstance(tool_calls, list)
+    assert len(tool_calls) == 3
+
+    assert tool_calls[0]["function"].get("arguments") is None
+    assert "arguments" not in tool_calls[1]["function"]
+    assert tool_calls[2]["function"].get("arguments") == ""
+
+
+def test_function_call_item_preserves_none_arguments_in_replay(converter):
+    """Function-call replay entries with explicit None args should remain None."""
+    function_call_with_none: TResponseInputItem = {
+        "id": "tool_none",
+        "call_id": "call_none",
+        "name": "net_scan",
+        "arguments": None,
+        "type": "function_call",
+    }
+
+    messages = converter.items_to_messages([function_call_with_none])
+    assert len(messages) == 1
+    assistant = messages[0]
+    tool_calls = assistant.get("tool_calls")
+    assert isinstance(tool_calls, list)
+    assert len(tool_calls) == 1
+    assert tool_calls[0]["function"].get("arguments") is None
+
+
 @pytest.mark.parametrize("role", ["user", "system", "developer"])
 def test_input_message_with_all_roles(converter, role: str):
     """

@@ -69,7 +69,7 @@ _BLOCKED_FLAGS = {
     "--post-file",
     "--body-file",
 }
-_USER_AGENTS = ["Cerberus AI Auditor"]
+_USER_AGENTS = ["Cerberus-AI"]
 
 
 class DownloadArtifact(BaseModel):

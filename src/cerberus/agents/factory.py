@@ -1,4 +1,4 @@
-"""Cerebro Agent Lifecycle Manager (CALM).
+"""Cerberus agent factory.
 
 This module provides a commercial-grade factory for dynamic, lazy, and
 safety-aware agent instantiation.
@@ -33,6 +33,17 @@ try:
     from cerberus.repl.ui.logging import get_cerberus_logger
 except Exception:  # pragma: no cover - optional logger
     get_cerberus_logger = None
+
+
+def _resolve_factory_api_key() -> str:
+    """Resolve runtime API key without shipping hardcoded placeholders."""
+    local_key = os.getenv("CERBERUS_LOCAL_KEY", "").strip()
+    api_key = get_effective_api_key(default=local_key)
+    if api_key:
+        return api_key
+    raise RuntimeError(
+        "No API key configured. Set CERBERUS_API_KEY (or CERBERUS_LOCAL_KEY for local-only runtime)."
+    )
 
 
 @dataclass(frozen=True)
@@ -246,7 +257,7 @@ class CerebroAgentFactory:
         extra_tools: Optional[Sequence[str]] = None,
         singleton: Optional[bool] = None,
     ) -> Agent:
-        """Spawn a role agent with hydrated prompt and injected CerebroContext."""
+        """Spawn a role agent with hydrated prompt and injected runtime context."""
         normalized_role = self._normalize_role(role)
         use_singleton = normalized_role in self._singleton_roles if singleton is None else singleton
 
@@ -393,7 +404,7 @@ class CerebroAgentFactory:
             "preferred_export": record.preferred_export,
             "__doc__": f"Lazy provider for role '{record.role}'",
         }
-        class_name = "CALM" + "".join(part.capitalize() for part in record.role.split("_")) + "Provider"
+        class_name = "AgentFactory" + "".join(part.capitalize() for part in record.role.split("_")) + "Provider"
         return type(class_name, (LazyModuleAgentProvider,), attrs)
 
     def _clone_runtime_agent(
@@ -413,7 +424,7 @@ class CerebroAgentFactory:
             or os.getenv(f"CERBERUS_{role.upper()}_MODEL")
             or get_effective_model()
         )
-        api_key = get_effective_api_key(default="sk-placeholder-key-for-local-models")
+        api_key = _resolve_factory_api_key()
 
         runtime_model = OpenAIChatCompletionsModel(
             model=model_name,
@@ -519,7 +530,7 @@ class CerebroAgentFactory:
             if isinstance(base_agent.instructions, str):
                 template_text = base_agent.instructions
             else:
-                template_text = "You are the Cerebro Generic Intelligence Agent. Operate safely and explain rationale."
+                template_text = "You are the Cerberus Generic Intelligence Agent. Operate safely and explain rationale."
 
         renderer = create_system_prompt_renderer(template_text)
         hydrated = renderer(**metadata)
@@ -590,7 +601,7 @@ class CerebroAgentFactory:
         base_prompt = self._hydrate_prompt(fallback_role, runtime_metadata, _generic_template_agent())
         toolbox = self._build_toolbox(fallback_role, allow_subghz=False, extra_tools=None)
         model_name = model_override or get_effective_model()
-        api_key = get_effective_api_key(default="sk-placeholder-key-for-local-models")
+        api_key = _resolve_factory_api_key()
 
         generic_agent = Agent(
             name=custom_name or "Generic Intelligence Agent",
@@ -640,7 +651,7 @@ class CerebroAgentFactory:
             if callable(audit):
                 audit(
                     "generic_intelligence failover due to missing persona file",
-                    actor="CALM",
+                    actor="agent_factory",
                     data={
                         "requested_role": role,
                         "missing_persona_file": missing_persona_paths[0],
@@ -692,7 +703,7 @@ class CerebroAgentFactory:
         if callable(audit):
             audit(
                 "PathGuard event",
-                actor="CALM",
+                actor="agent_factory",
                 data=data,
                 tags=["pathguard", event],
             )
@@ -741,7 +752,7 @@ class CerebroAgentFactory:
         if callable(audit):
             audit(
                 f"Lifecycle Event: {event}",
-                actor="CALM",
+                actor="agent_factory",
                 data=payload,
                 tags=["lifecycle", "agent_factory", event],
             )
@@ -753,7 +764,7 @@ class CerebroAgentFactory:
 def _generic_template_agent() -> Agent:
     """Internal helper used exclusively for prompt hydration fallback path."""
     model_name = get_effective_model()
-    api_key = get_effective_api_key(default="sk-placeholder-key-for-local-models")
+    api_key = _resolve_factory_api_key()
     api_base = get_effective_api_base()
     return Agent(
         name="Generic Intelligence Agent Template",
@@ -774,7 +785,7 @@ _GLOBAL_FACTORY: Optional[CerebroAgentFactory] = None
 
 
 def get_cerebro_agent_factory() -> CerebroAgentFactory:
-    """Compatibility accessor for a process-wide CALM instance."""
+    """Compatibility accessor for a process-wide agent factory instance."""
     global _GLOBAL_FACTORY
     if _GLOBAL_FACTORY is None:
         _GLOBAL_FACTORY = CerebroAgentFactory()

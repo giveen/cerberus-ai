@@ -26,6 +26,7 @@ from cerberus.tools.misc.reasoning import MODE_CRITIQUE, MODE_STRATEGY, REASONIN
 from cerberus.tools.reconnaissance.filesystem import PathGuard as FilesystemPathGuard
 from cerberus.tools.workspace import get_project_space
 from cerberus.util import create_system_prompt_renderer, load_prompt_template
+from cerberus.util.config import get_effective_api_key
 
 
 @dataclass
@@ -613,6 +614,10 @@ class CerebroReportingAgent:
 
 
 load_dotenv()
+api_key = get_effective_api_key(default="")
+if not api_key:
+    raise ValueError("No API key configured. Please set CERBERUS_API_KEY or use the local config.")
+
 _report_prompt = load_prompt_template("prompts/system_reporting_agent.md")
 _tools: List[Any] = []
 for _meta in get_all_tools():
@@ -631,7 +636,7 @@ reporting_agent = Agent(
     tools=_tools,
     model=OpenAIChatCompletionsModel(
         model=os.getenv("CERBERUS_MODEL", "cerebro1"),
-        openai_client=AsyncOpenAI(api_key=os.getenv("CERBERUS_API_KEY", os.getenv("OPENAI_API_KEY", "sk-placeholder"))),
+        openai_client=AsyncOpenAI(api_key=api_key),
     ),
 )
 

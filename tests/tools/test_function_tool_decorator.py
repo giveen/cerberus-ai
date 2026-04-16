@@ -111,6 +111,23 @@ async def test_error_on_invalid_json():
     assert "Invalid JSON input for tool" in str(exc_info.value)
 
 
+@function_tool(failure_error_function=None)
+def requires_target_and_args(target: str, args: str) -> str:
+    return f"{target}:{args}"
+
+
+@pytest.mark.asyncio
+async def test_malformed_nonempty_payload_that_collapses_to_empty_fails_loudly():
+    tool = requires_target_and_args
+    bad_input = "COMMITTING_JSON: {} trailing malformed payload"
+    with pytest.raises(Exception) as exc_info:
+        await tool.on_invoke_tool(ctx_wrapper(), bad_input)
+
+    message = str(exc_info.value)
+    assert "parsed arguments collapsed to empty object" in message
+    assert "Required fields: target, args" in message
+
+
 def sync_error_handler(ctx: RunContextWrapper[Any], error: Exception) -> str:
     return f"error_{error.__class__.__name__}"
 

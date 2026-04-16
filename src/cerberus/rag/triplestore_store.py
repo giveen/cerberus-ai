@@ -7,6 +7,7 @@ or circular imports.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from cerberus.rag.triplestore import TripleStore
@@ -16,7 +17,7 @@ _GLOBAL_TRIPLESTORE: Optional[TripleStore] = None
 
 
 def _default_triplestore_path() -> str:
-    return os.environ.get("CERBERUS_TRIPLESTORE_PATH") or os.path.join(os.getcwd(), ".cerberus", "triplestore.db")
+    return os.environ.get("CERBERUS_TRIPLESTORE_PATH") or str(Path.cwd() / ".cerberus" / "triplestore.db")
 
 
 def get_global_triplestore(db_path: Optional[str] = None, pragmas: Optional[Dict[str, str]] = None) -> TripleStore:
@@ -31,10 +32,10 @@ def get_global_triplestore(db_path: Optional[str] = None, pragmas: Optional[Dict
     if _GLOBAL_TRIPLESTORE is None:
         path = db_path or _default_triplestore_path()
         # ensure directory exists for on-disk DB
-        dirpath = os.path.dirname(path)
-        if dirpath and not os.path.exists(dirpath):
+        dirpath = Path(path).parent
+        if dirpath and not dirpath.exists():
             try:
-                os.makedirs(dirpath, exist_ok=True)
+                dirpath.mkdir(parents=True, exist_ok=True)
             except Exception:
                 # best-effort: ignore failures and let TripleStore fall back
                 pass

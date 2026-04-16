@@ -163,6 +163,20 @@ def _merge_stream_fragment(existing: str, fragment: str) -> str:
     return existing + fragment
 
 
+def _normalize_tool_argument_fragment(raw: Any) -> str:
+    """Normalize tool argument fragments to strings without injecting fallbacks."""
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, (dict, list)):
+        try:
+            return json.dumps(raw, ensure_ascii=True, separators=(",", ":"))
+        except Exception:
+            return str(raw)
+    return str(raw)
+
+
 def _check_local_preflight_target(target_url: str) -> tuple[bool, str]:
     """Return local-target reachability status for preflight alerting."""
     try:
@@ -201,15 +215,17 @@ def _alert_if_local_preflight_target_unreachable(*, target_url: str, model: str)
         return
 
     _PREFLIGHT_ALERTED_UNREACHABLE.add(target_url)
-    logger.warning("Local preflight target unreachable: %s (%s)", target_url, reason)
     try:
         from rich.console import Console
 
-        Console().print(
-            f"[yellow]Local model preflight warning:[/yellow] target {target_url} unreachable for model {model}."
+        Console(stderr=True).print(
+            f"[bold red]Error:[/bold red] Local LLM at {_PREFLIGHT_TARGET_HOST} is unreachable. Please check your backend."
         )
     except Exception:
-        pass
+        print(
+            f"Error: Local LLM at {_PREFLIGHT_TARGET_HOST} is unreachable. Please check your backend.",
+            file=__import__('sys').stderr,
+        )
 
 
 def _sanitize_llm_tool_args(raw: str | None) -> str:
@@ -227,6 +243,24 @@ def _sanitize_llm_tool_args(raw: str | None) -> str:
     if not cleaned:
         return "{}"
     return cleaned
+
+
+def _sanitize_replay_tool_args(raw: Any) -> Any:
+    """Sanitize replayed tool-call args without injecting fallback JSON.
+
+    Replay/history conversion should preserve prior model output shape to avoid
+    teaching the model that empty argument objects are acceptable defaults.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return json.dumps(raw, ensure_ascii=True)
+    if isinstance(raw, str):
+        cleaned = raw
+        for pat in _LLM_TAG_PATTERNS:
+            cleaned = pat.sub("", cleaned)
+        return cleaned.strip()
+    return raw
 
 
 def _parse_tool_args(raw: str | None, tool_name: str = "") -> dict[str, Any] | None:
@@ -300,7 +334,7 @@ litellm.suppress_debug_info = True
 if os.getenv("CERBERUS_MODEL") == "o3-mini" or os.getenv("CERBERUS_MODEL") == "gemini-1.5-pro":
     litellm.drop_params = True
 
-_USER_AGENT = "Cerberus AI Auditor"
+_USER_AGENT = "Cerberus-AI"
 _HEADERS = {"User-Agent": _USER_AGENT}
 
 
@@ -538,11 +572,12 @@ def count_tokens_with_tiktoken(text_or_messages):
     try:
         # Try to use cl100k_base encoding (used by GPT-4 and GPT-3.5-turbo)
         encoding = tiktoken.get_encoding("cl100k_base")
-    except:
+    except Exception:
         # Fall back to GPT-2 encoding if cl100k is not available
         try:
             encoding = tiktoken.get_encoding("gpt2")
-        except:
+        except Exception as exc:
+            logger.debug("tiktoken unavailable (%s); using character-based token estimate", exc)
             # If tiktoken fails, fall back to character estimate
             if isinstance(text_or_messages, str):
                 return len(text_or_messages) // 4, 0
@@ -935,8 +970,9 @@ class OpenAIChatCompletionsModel(Model):
                 from cerberus.util import fix_message_list
 
                 converted_messages = fix_message_list(converted_messages)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.critical("fix_message_list failed before API call in get_response: %s", exc, exc_info=True)
+                raise RuntimeError("Unable to repair message history before LLM request") from exc
 
             # Get token count estimate before API call for consistent counting
             estimated_input_tokens, _ = count_tokens_with_tiktoken(converted_messages)
@@ -1223,7 +1259,11 @@ class OpenAIChatCompletionsModel(Model):
                         title=getattr(self, "agent_name", "Agent"),
                     )
                 except TypeError as exc:
-                    logger.debug("TRACE_DEBUG: cli_print_agent_messages fallback: %s", exc)
+                    _RUNTIME_DEBUG_LOGGER.write(
+                        channel="trace_debug",
+                        message="cli_print_agent_messages_fallback",
+                        payload={"error": str(exc), "phase": "non_stream_response"},
+                    )
                     print("[assistant] tool-use intent emitted")
 
                 # Restore previous streaming setting
@@ -2056,13 +2096,15 @@ class OpenAIChatCompletionsModel(Model):
 
                                 if tc_function:
                                     # Handle both object and dict formats
-                                    args = ""
+                                    args: Any = ""
                                     if hasattr(tc_function, "arguments"):
-                                        args = tc_function.arguments or ""
+                                        args = tc_function.arguments
                                     elif (
                                         isinstance(tc_function, dict) and "arguments" in tc_function
                                     ):
-                                        args = tc_function.get("arguments", "") or ""
+                                        args = tc_function.get("arguments")
+
+                                    args = _normalize_tool_argument_fragment(args)
 
                                     name = ""
                                     if hasattr(tc_function, "name"):
@@ -2246,7 +2288,11 @@ class OpenAIChatCompletionsModel(Model):
                                             title=getattr(self, "agent_name", "Agent"),
                                         )
                                     except TypeError as exc:
-                                        logger.debug("TRACE_DEBUG: cli_print_agent_messages fallback: %s", exc)
+                                        _RUNTIME_DEBUG_LOGGER.write(
+                                            channel="trace_debug",
+                                            message="cli_print_agent_messages_fallback",
+                                            payload={"error": str(exc), "phase": "ollama_tool_preview"},
+                                        )
                                         print("[assistant] tool-use intent emitted")
 
                                     # Set flag to suppress final output to avoid duplication
@@ -2329,7 +2375,11 @@ class OpenAIChatCompletionsModel(Model):
                             title=getattr(self, "agent_name", "Agent"),
                         )
                     except TypeError as exc:
-                        logger.debug("TRACE_DEBUG: cli_print_agent_messages fallback: %s", exc)
+                        _RUNTIME_DEBUG_LOGGER.write(
+                            channel="trace_debug",
+                            message="cli_print_agent_messages_fallback",
+                            payload={"error": str(exc), "phase": "tool_execution_line"},
+                        )
                         print("🛠️ Agent executing tool call")
 
                     # First, a ResponseOutputItemAdded for the function call
@@ -2861,8 +2911,9 @@ class OpenAIChatCompletionsModel(Model):
             # Log if the message list was changed significantly
             if new_length != prev_length:
                 logger.debug(f"Message list was fixed: {prev_length} -> {new_length} messages")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.critical("fix_message_list failed before _fetch_response dispatch: %s", exc, exc_info=True)
+            raise RuntimeError("Unable to sanitize message history before model fetch") from exc
 
         parallel_tool_calls = (
             True if model_settings.parallel_tool_calls and tools and len(tools) > 0 else NOT_GIVEN
@@ -2928,7 +2979,7 @@ class OpenAIChatCompletionsModel(Model):
         if "cerebro" in model_str and "cerebro1.5" not in model_str:  # NOTE: exclude cerebro1.5
             kwargs["api_base"] = get_effective_api_base()
             kwargs["custom_llm_provider"] = "openai"
-            kwargs["api_key"] = get_effective_api_key(default="REDACTED_CERBERUS_KEY")
+            kwargs["api_key"] = get_effective_api_key()
         elif "/" in model_str:
             # Handle provider/model format
             provider = model_str.split("/")[0]
@@ -3117,7 +3168,6 @@ class OpenAIChatCompletionsModel(Model):
             "user_prompt": user_preview,
             "message_count": len(converted_messages),
         }
-        logger.debug("Transparent Auditor preflight payload: %s", json.dumps(preflight_payload, ensure_ascii=True))
         _RUNTIME_DEBUG_LOGGER.write(
             channel="llm_preflight",
             message="preflight_payload",
@@ -3870,7 +3920,6 @@ class OpenAIChatCompletionsModel(Model):
         try:
             if stream:
                 # Standard LiteLLM handling for streaming
-                ret = await _acompletion_with_404_fallback(kwargs)
                 stream_obj = await _acompletion_with_404_fallback(kwargs)
 
                 response = Response(
@@ -3944,7 +3993,6 @@ class OpenAIChatCompletionsModel(Model):
                 kwargs["messages"] = messages
                 # Retry once, silently
                 if stream:
-                    ret = await _acompletion_with_404_fallback(kwargs)
                     stream_obj = await _acompletion_with_404_fallback(kwargs)
                     response = Response(
                         id=FAKE_RESPONSES_ID,
@@ -4271,7 +4319,7 @@ class OpenAIChatCompletionsModel(Model):
     def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
             # Determine API key
-            api_key = get_effective_api_key(default="sk-cerebro-1234567890")
+            api_key = get_effective_api_key()
             base_url = get_effective_api_base(default="http://localhost:8000/v1")
             self._client = AsyncOpenAI(
                 api_key=api_key,
@@ -4339,7 +4387,7 @@ class OpenAIChatCompletionsModel(Model):
                     "type": "function",
                     "function": {
                         "name": fn_name,
-                        "arguments": fn_arguments,
+                        "arguments": _normalize_tool_argument_fragment(fn_arguments),
                     },
                 }
             ]
@@ -4364,9 +4412,9 @@ class OpenAIChatCompletionsModel(Model):
                                     "type": "function",
                                     "function": {
                                         "name": parsed["name"],
-                                        "arguments": json.dumps(parsed["arguments"])
-                                        if isinstance(parsed["arguments"], dict)
-                                        else parsed["arguments"],
+                                        "arguments": _normalize_tool_argument_fragment(
+                                            parsed.get("arguments")
+                                        ),
                                     },
                                 }
                             ]
@@ -4377,6 +4425,12 @@ class OpenAIChatCompletionsModel(Model):
         # Anthropic-style tool_use format
         if hasattr(delta, "tool_use") and delta.tool_use:
             tool_use = delta.tool_use
+            tool_input = tool_use.get("input")
+            if tool_input is None:
+                for alt_key in ("arguments", "input_json", "tool_input"):
+                    if alt_key in tool_use:
+                        tool_input = tool_use.get(alt_key)
+                        break
             return [
                 {
                     "index": 0,
@@ -4384,12 +4438,18 @@ class OpenAIChatCompletionsModel(Model):
                     "type": "function",
                     "function": {
                         "name": tool_use.get("name", ""),
-                        "arguments": tool_use.get("input", "{}"),
+                        "arguments": _normalize_tool_argument_fragment(tool_input),
                     },
                 }
             ]
         elif isinstance(delta, dict) and "tool_use" in delta and delta["tool_use"]:
             tool_use = delta["tool_use"]
+            tool_input = tool_use.get("input")
+            if tool_input is None:
+                for alt_key in ("arguments", "input_json", "tool_input"):
+                    if alt_key in tool_use:
+                        tool_input = tool_use.get(alt_key)
+                        break
             return [
                 {
                     "index": 0,
@@ -4397,7 +4457,7 @@ class OpenAIChatCompletionsModel(Model):
                     "type": "function",
                     "function": {
                         "name": tool_use.get("name", ""),
-                        "arguments": tool_use.get("input", "{}"),
+                        "arguments": _normalize_tool_argument_fragment(tool_input),
                     },
                 }
             ]
@@ -4722,28 +4782,25 @@ class _Converter:
                 and item.get("tool_calls")
             ):
                 flush_assistant_message()
-                tool_calls_param: list[ChatCompletionMessageToolCallParam] = []
+                tool_calls_param: list[dict[str, Any]] = []
                 for tc in item["tool_calls"]:
                     function_details = tc.get("function", {})
-                    arguments = function_details.get("arguments")
-                    # Ensure arguments is a valid JSON string, defaulting to "{}" if empty or None
-                    if arguments is None or (
-                        isinstance(arguments, str) and arguments.strip() == ""
-                    ):
-                        arguments = "{}"
-                    elif isinstance(arguments, dict):
-                        # Ensure it's a string if it's a dict (should already be string per schema)
-                        arguments = json.dumps(arguments)
+                    function_payload: dict[str, Any] = {
+                        "name": function_details.get("name", "unknown_function"),
+                    }
+
+                    # Preserve replayed argument shape (None/omitted/str) without {} coercion.
+                    if isinstance(function_details, dict) and "arguments" in function_details:
+                        function_payload["arguments"] = _sanitize_replay_tool_args(
+                            function_details.get("arguments")
+                        )
 
                     tool_calls_param.append(
-                        ChatCompletionMessageToolCallParam(
-                            id=tc.get("id", "")[:40],
-                            type=tc.get("type", "function"),
-                            function={
-                                "name": function_details.get("name", "unknown_function"),
-                                "arguments": arguments,  # Use sanitized arguments
-                            },
-                        )
+                        {
+                            "id": tc.get("id", "")[:40],
+                            "type": tc.get("type", "function"),
+                            "function": function_payload,
+                        }
                     )
                 msg_asst: ChatCompletionAssistantMessageParam = {
                     "role": "assistant",
@@ -4883,21 +4940,17 @@ class _Converter:
                     "execution_info": {"start_time": time.time()},
                 }
 
-                arguments = func_call.get("arguments")  # func_call is a dict here
-                # Ensure arguments is a valid JSON string, defaulting to "{}" if empty or None
-                if arguments is None or (isinstance(arguments, str) and arguments.strip() == ""):
-                    arguments = "{}"
-                elif isinstance(arguments, dict):
-                    arguments = json.dumps(arguments)
+                function_payload: dict[str, Any] = {"name": func_call["name"]}
+                if "arguments" in func_call:
+                    function_payload["arguments"] = _sanitize_replay_tool_args(
+                        func_call.get("arguments")
+                    )
 
-                new_tool_call = ChatCompletionMessageToolCallParam(
-                    id=func_call["call_id"][:40],
-                    type="function",
-                    function={
-                        "name": func_call["name"],
-                        "arguments": arguments,  # Use sanitized arguments
-                    },
-                )
+                new_tool_call: dict[str, Any] = {
+                    "id": func_call["call_id"][:40],
+                    "type": "function",
+                    "function": function_payload,
+                }
                 tool_calls.append(new_tool_call)
                 asst["tool_calls"] = tool_calls
 

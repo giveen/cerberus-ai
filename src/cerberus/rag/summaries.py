@@ -11,6 +11,7 @@ import os
 import re
 import json
 import datetime as _dt
+from pathlib import Path
 from typing import Dict, List, Optional
 
 # Small stopword set for deterministic extractive summarization
@@ -135,15 +136,16 @@ def _default_store_path() -> str:
     if env:
         return env
     # place under project-local .cerberus directory by default
-    return os.path.join(os.getcwd(), ".cerberus", "wakeup_summaries.json")
+    return str(Path.cwd() / ".cerberus" / "wakeup_summaries.json")
 
 
 def read_persisted_summaries(store_path: Optional[str] = None) -> Dict[str, Dict[str, str]]:
     path = store_path or _default_store_path()
     try:
-        if not os.path.exists(path):
+        path_obj = Path(path)
+        if not path_obj.exists():
             return {}
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path_obj, "r", encoding="utf-8") as fh:
             return json.load(fh)
     except Exception:
         return {}
@@ -155,10 +157,11 @@ def persist_summaries(palace_id: str, l0: str, l1: Optional[str] = None, store_p
     # Use timezone-aware ISO8601 for updated_at
     data[palace_id] = {"L0": l0, "L1": l1, "updated_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}
     try:
-        d = os.path.dirname(path)
-        if d and not os.path.exists(d):
-            os.makedirs(d, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
+        path_obj = Path(path)
+        parent_dir = path_obj.parent
+        if str(parent_dir) and not parent_dir.exists():
+            parent_dir.mkdir(parents=True, exist_ok=True)
+        with open(path_obj, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2, ensure_ascii=False)
         return True
     except Exception:

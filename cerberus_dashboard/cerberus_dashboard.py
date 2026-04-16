@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import random
@@ -23,6 +24,7 @@ MAX_SESSIONS = 4
 MAX_LOG_ENTRIES = 60
 POLICY_HISTORY_LIMIT = 10
 PROMPT_STREAM_LINE_LIMIT = 400
+HEADLESS_ACTION_TIMEOUT_S = 600
 NEON_GREEN = "#00FF00"
 NEON_CYAN = "#00FFFF"
 BG_BLACK = "#000000"
@@ -554,6 +556,18 @@ custom_css: dict[str, Any] = {
         "0%": {"opacity": "0.94", "filter": "drop-shadow(0 0 1px rgba(0, 255, 0, 0.35))"},
         "50%": {"opacity": "1", "filter": "drop-shadow(0 0 3px rgba(0, 255, 255, 0.18))"},
         "100%": {"opacity": "0.96", "filter": "drop-shadow(0 0 1px rgba(0, 255, 0, 0.28))"},
+    },
+    "@keyframes terminalBusy": {
+        "0%": {"border-color": "rgba(0, 255, 255, 0.25)", "box-shadow": "0 0 0 0 rgba(0, 255, 255, 0.12)"},
+        "50%": {"border-color": "rgba(0, 255, 255, 0.70)", "box-shadow": "0 0 0 4px rgba(0, 255, 255, 0.06)"},
+        "100%": {"border-color": "rgba(0, 255, 255, 0.25)", "box-shadow": "0 0 0 0 rgba(0, 255, 255, 0.12)"},
+    },
+    ".terminal-busy": {
+        "animation": "terminalBusy 1.6s ease-in-out infinite",
+    },
+    ".terminal-error": {
+        "border": "1px solid rgba(255, 107, 107, 0.75) !important",
+        "box-shadow": "0 0 0 2px rgba(255, 107, 107, 0.12) !important",
     },
 }
 
@@ -1207,7 +1221,22 @@ class AgentDashboardState(rx.State):
                 status_line="Policy cleared. Dispatching headless action.",
             )
 
-        await self._dispatch_verified_action(index, action=action, session=session, report=report)
+        try:
+            await asyncio.wait_for(
+                self._dispatch_verified_action(index, action=action, session=session, report=report),
+                timeout=HEADLESS_ACTION_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            async with self:
+                self._append_log(index, "System", "⚠ Headless action timed out after 600 seconds.")
+                self._apply_report_state(
+                    index,
+                    report,
+                    is_busy=False,
+                    status="error",
+                    status_line="Execution timed out.",
+                )
+                self._refresh_system_health()
 
     async def _start_session_command(self, session_id: str, command: str | None = None) -> None:
         async with self:
@@ -1217,7 +1246,7 @@ class AgentDashboardState(rx.State):
 
             session = self._session_copy(index)
             command_text = (command if command is not None else session.command_input).strip()
-            if not command_text or session.is_busy:
+            if not command_text or session.is_busy or session.status == "error":
                 return
 
             action = self._parse_prompt_to_action(command_text)
@@ -1288,6 +1317,24 @@ class AgentDashboardState(rx.State):
     @rx.event(background=True)
     async def process_session_command(self, session_id: str) -> None:
         await self._start_session_command(session_id)
+
+    @rx.event
+    def clear_error(self, session_id: str) -> None:
+        index = self._index_for_session_id(session_id)
+        if index is None:
+            return
+        session = self._session_copy(index)
+        if session.status not in {"busy", "error"}:
+            return
+        session.is_busy = False
+        session.status = "ready"
+        session.status_line = "Ready. Error cleared by operator."
+        session.logs = [
+            *session.logs,
+            _log_entry("System", "⚠ Error cleared. Terminal reset."),
+        ][-MAX_LOG_ENTRIES:]
+        self._store_session(index, session)
+        self._refresh_system_health()
 
     @rx.event(background=True)
     async def submit_session_command(self, session_id: str, form_data: dict[str, str]) -> None:
@@ -1719,7 +1766,20 @@ def terminal_window(session: AgentSession) -> rx.Component:
         height="100%",
         min_height="0",
         border_radius="18px",
-        border="1px solid rgba(0, 255, 255, 0.14)",
+        border=rx.cond(
+            session.status == "error",
+            "1px solid rgba(255, 107, 107, 0.75)",
+            rx.cond(
+                session.is_busy,
+                "1px solid rgba(0, 255, 255, 0.55)",
+                "1px solid rgba(0, 255, 0, 0.35)",
+            ),
+        ),
+        class_name=rx.cond(
+            session.status == "error",
+            "terminal-error",
+            rx.cond(session.is_busy, "terminal-busy", ""),
+        ),
     )
 
 
@@ -1896,7 +1956,7 @@ def active_command_form(session: AgentSession) -> rx.Component:
                     placeholder="Type a prompt for the active agent. Press Enter to send.",
                     rows=1,
                     resize="none",
-                    disabled=session.is_busy,
+                    disabled=session.is_busy | (session.status == "error"),
                     width="100%",
                     min_height="56px",
                     max_height="180px",
@@ -1922,11 +1982,25 @@ def active_command_form(session: AgentSession) -> rx.Component:
                     min_width="96px",
                     height="56px",
                     _hover={"background": "rgba(0, 255, 0, 0.14)"},
-                    is_disabled=rx.cond(session.is_busy, True, session.command_input == ""),
+                    is_disabled=rx.cond(session.is_busy | (session.status == "error"), True, session.command_input == ""),
                 ),
                 width="100%",
                 align="stretch",
                 spacing="3",
+            ),
+            rx.cond(
+                (session.status == "error") | (session.status == "busy"),
+                rx.button(
+                    "Clear Error",
+                    on_click=AgentDashboardState.clear_error(session.session_id),
+                    background="rgba(255, 107, 107, 0.10)",
+                    color="#FF8F8F",
+                    border="1px solid rgba(255, 107, 107, 0.55)",
+                    border_radius="10px",
+                    width="100%",
+                    _hover={"background": "rgba(255, 107, 107, 0.18)"},
+                ),
+                rx.box(display="none"),
             ),
             rx.text(
                 "Enter sends the prompt. Shift+Enter inserts a new line.",

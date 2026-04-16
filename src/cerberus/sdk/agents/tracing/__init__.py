@@ -98,14 +98,16 @@ def set_tracing_disabled(disabled: bool) -> None:
 
 
 def set_tracing_export_api_key(api_key: str) -> None:
+    """No-op retained for API compatibility.
+
+    All trace export is handled locally by WorkspaceSpanExporter. No external
+    network calls are made and no API key is required.
     """
-    Set the OpenAI API key for the backend exporter.
-    """
-    default_exporter().set_api_key(api_key)
+    _ = api_key  # intentionally ignored
 
 
-# Add the default processor, which exports traces and spans to the backend in batches. You can
-# change the default behavior by either:
+# Add the default processor, which writes traces/spans to the local workspace
+# debug log. You can change the default behavior by either:
 # 1. calling add_trace_processor(), which adds additional processors, or
 # 2. calling set_trace_processors(), which replaces the default processor.
 add_trace_processor(default_processor())

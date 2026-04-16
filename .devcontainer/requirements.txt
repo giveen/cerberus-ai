@@ -1,6 +1,0 @@
-pymetasploit3
-networkx==2.5
-requests
-wasabi
-xmltodict
-pydot==1.4.2

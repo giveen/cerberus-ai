@@ -9,6 +9,7 @@ import os
 import asyncio
 import json
 import datetime
+import logging
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
@@ -29,7 +30,10 @@ from cerberus.repl.commands.parallel import PARALLEL_CONFIGS
 from cerberus.sdk.agents.simple_agent_manager import AGENT_MANAGER
 from cerberus.memory import MemoryManager
 from cerberus.memory.memory import MemoryManager as RuntimeMemoryManager
+from cerberus.util.config import get_effective_api_base, get_effective_api_key
 from openai import AsyncOpenAI
+
+logger = logging.getLogger(__name__)
 
 # Import get_compact_model function - imported later to avoid circular import
 def get_compact_model():
@@ -315,8 +319,8 @@ class MemoryCommand(Command):
                         if line.startswith("Agent: "):
                             agent_name = line[7:]
                             break
-                except:
-                    pass
+                except Exception as exc:
+                    logger.warning("Failed to read memory file %s for control panel metadata: %s", memory_file, exc)
                 
                 size = memory_file.stat().st_size
                 modified = datetime.datetime.fromtimestamp(memory_file.stat().st_mtime)
@@ -805,8 +809,8 @@ Model: {get_compact_model() or os.environ.get("CERBERUS_MODEL", "gpt-4")}
                         try:
                             msg_count = int(line.split("Original messages: ")[1].split()[0])
                             total_messages += msg_count
-                        except:
-                            pass
+                        except Exception as exc:
+                            logger.warning("Failed to parse original message count from memory %s: %s", memory_path, exc)
                     elif line.strip() == "## Summary":
                         in_summary = True
                         continue
@@ -1328,7 +1332,10 @@ This session is being continued from a previous conversation that ran out of con
             instructions=instructions,
             model=OpenAIChatCompletionsModel(
                 model=model_name,
-                openai_client=AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY")),
+                openai_client=AsyncOpenAI(
+                    api_key=get_effective_api_key(),
+                    base_url=get_effective_api_base(),
+                ),
                 agent_name="Summary Agent"
             )
         )
@@ -1569,8 +1576,8 @@ This session is being continued from a previous conversation that ran out of con
                     import cerberus.cli
                     if hasattr(cerberus.cli, 'agent'):
                         setattr(cerberus.cli, 'agent', new_agent)
-                except:
-                    pass
+                except Exception as exc:
+                    logger.warning("Failed to update active CLI agent reference for %s: %s", agent_name, exc)
             
             console.print(f"[green]✓ Reloaded agent '{agent_name}' with memory applied[/green]")
             console.print("[dim]The memory is now included in the agent's system prompt[/dim]")

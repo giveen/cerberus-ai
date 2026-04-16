@@ -20,6 +20,14 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
+from cerberus.util.config import (
+    get_effective_api_base,
+    get_effective_api_key,
+    get_effective_model,
+    has_explicit_api_base_config,
+    has_explicit_model_config,
+)
+
 
 @dataclass
 class EmbeddingsConfig:
@@ -121,16 +129,38 @@ class LocalDeterministicEmbeddingsProvider(EmbeddingsProvider):
         return results
 
 
+def _has_openai_credentials() -> bool:
+    """Return True when explicit OpenAI credentials are present."""
+    return bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"))
+
+
+def _has_local_embeddings_runtime() -> bool:
+    """Return True when a local OpenAI-compatible embeddings runtime is configured."""
+    return has_explicit_api_base_config() or has_explicit_model_config()
+
+
+def _resolve_openai_embeddings_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Fill provider config from shared runtime settings when using an OpenAI-compatible path."""
+    if isinstance(config, EmbeddingsConfig):
+        resolved = dict(config.__dict__)
+    else:
+        resolved = dict(config or {})
+    current_model = str(resolved.get("model_name") or "").strip()
+    if has_explicit_model_config() and (not current_model or current_model == "local-deterministic"):
+        resolved["model_name"] = get_effective_model()
+    return resolved
+
+
 class OpenAIEmbeddingsProvider(EmbeddingsProvider):
     """OpenAI-backed embeddings provider.
 
-    Tries to use the `openai` package if available and `OPENAI_API_KEY`
-    is set in the environment. Batching is handled according to
-    `EmbeddingsConfig.batch_size`.
+    Tries to use the `openai` package if available and either explicit
+    OpenAI credentials or a local OpenAI-compatible runtime is configured.
+    Batching is handled according to `EmbeddingsConfig.batch_size`.
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
-        super().__init__(config=config)
+        super().__init__(config=_resolve_openai_embeddings_config(config))
         # lazy import of openai to avoid hard dependency at module import
         try:
             import openai  # type: ignore
@@ -139,10 +169,22 @@ class OpenAIEmbeddingsProvider(EmbeddingsProvider):
         except Exception as exc:  # pragma: no cover - environment dependent
             raise RuntimeError("openai package is required for OpenAIEmbeddingsProvider") from exc
 
-        if not (os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY")):
-            # allow service account style keys or other env names in practice
-            # but make the error clear
-            raise RuntimeError("OPENAI_API_KEY environment variable is not set")
+        self._api_base = get_effective_api_base() if _has_local_embeddings_runtime() else ""
+        self._api_key = get_effective_api_key(default="")
+
+        if not _has_openai_credentials() and not self._api_base:
+            raise RuntimeError(
+                "No embeddings backend configured. Set OPENAI_API_KEY or configure CERBERUS_API_BASE/CERBERUS_MODEL for a local runtime."
+            )
+
+        if self._api_base:
+            if hasattr(self._openai, "api_base"):
+                self._openai.api_base = self._api_base
+            if hasattr(self._openai, "base_url"):
+                self._openai.base_url = self._api_base
+
+        if self._api_key and hasattr(self._openai, "api_key"):
+            self._openai.api_key = self._api_key
 
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
         # Use model name from config
@@ -244,13 +286,16 @@ def get_embeddings_provider(name: Optional[str] = None, config: Optional[Dict[st
     """Factory that returns an `EmbeddingsProvider` instance.
 
     If `name` is not provided, the environment variable
-    `CERBERUS_EMBEDDINGS_PROVIDER` is consulted. When unset, prefer OpenAI if
-    an API key is present; otherwise fall back to the local deterministic
+    `CERBERUS_EMBEDDINGS_PROVIDER` is consulted. When unset, prefer an
+    explicitly configured local OpenAI-compatible runtime, then OpenAI when
+    an API key is present, otherwise fall back to the local deterministic
     provider.
     """
     chosen = (name or os.getenv("CERBERUS_EMBEDDINGS_PROVIDER") or "").lower()
     if not chosen:
-        if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
+        if _has_local_embeddings_runtime():
+            chosen = "openai"
+        elif _has_openai_credentials():
             chosen = "openai"
         else:
             chosen = "local-deterministic"

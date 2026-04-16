@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import os
 import queue
-import random
 import threading
 import time
-from functools import cached_property
 from typing import Any
 
-import httpx
 from cerberus.internal.debug_logger import get_debug_logger
 
 from ..logger import logger
@@ -26,90 +22,6 @@ class ConsoleSpanExporter(TracingExporter):
                 print(f"[Exporter] Export trace_id={item.trace_id}, name={item.name}, ")
             else:
                 print(f"[Exporter] Export span: {item.export()}")
-
-
-class BackendSpanExporter(TracingExporter):
-    def __init__(
-        self,
-        api_key: str | None = None,
-        organization: str | None = None,
-        project: str | None = None,
-        endpoint: str = "https://api.openai.com/v1/traces/ingest",
-        max_retries: int = 3,
-        base_delay: float = 1.0,
-        max_delay: float = 30.0,
-    ):
-        self._api_key = api_key
-        self._organization = organization
-        self._project = project
-        self.endpoint = endpoint
-        self.max_retries = max_retries
-        self.base_delay = base_delay
-        self.max_delay = max_delay
-        self._client = httpx.Client(timeout=httpx.Timeout(timeout=60, connect=5.0))
-
-    def set_api_key(self, api_key: str):
-        self._api_key = api_key
-        self.api_key = api_key
-
-    @cached_property
-    def api_key(self):
-        return self._api_key or os.environ.get("OPENAI_API_KEY")
-
-    @cached_property
-    def organization(self):
-        return self._organization or os.environ.get("OPENAI_ORG_ID")
-
-    @cached_property
-    def project(self):
-        return self._project or os.environ.get("OPENAI_PROJECT_ID")
-
-    def export(self, items: list[Trace | Span[Any]]) -> None:
-        if not items:
-            return
-
-        if not self.api_key:
-            logger.warning("OPENAI_API_KEY is not set, skipping trace export")
-            return
-
-        data = [item.export() for item in items if item.export()]
-        payload = {"data": data}
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "OpenAI-Beta": "traces=v1",
-        }
-
-        attempt = 0
-        delay = self.base_delay
-        while True:
-            attempt += 1
-            try:
-                response = self._client.post(url=self.endpoint, headers=headers, json=payload)
-                if response.status_code < 300:
-                    logger.debug("Exported %d trace item(s)", len(items))
-                    return
-                if 400 <= response.status_code < 500:
-                    logger.error(
-                        "[non-fatal] Tracing client error %s: %s",
-                        response.status_code,
-                        getattr(response, "text", ""),
-                    )
-                    return
-                logger.warning("[non-fatal] Tracing: server error %s, retrying.", response.status_code)
-            except httpx.RequestError as exc:
-                logger.warning("[non-fatal] Tracing: request failed: %s", exc)
-
-            if attempt >= self.max_retries:
-                logger.error("[non-fatal] Tracing: max retries reached, giving up on this batch.")
-                return
-
-            sleep_time = delay + random.uniform(0, 0.1 * delay)
-            time.sleep(sleep_time)
-            delay = min(delay * 2, self.max_delay)
-
-    def close(self):
-        self._client.close()
 
 
 class WorkspaceSpanExporter(TracingExporter):

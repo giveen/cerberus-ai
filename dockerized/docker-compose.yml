@@ -18,13 +18,21 @@ services:
     ports:
       - "8000:8000"
       - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     depends_on:
       redis:
         condition: service_healthy
       searxng:
         condition: service_started
+    networks:
+      - cerberus-bridge
     stop_grace_period: 30s
-    restart: unless-stopped
+    restart: "no"
 
   cerberus:
     build:
@@ -38,29 +46,39 @@ services:
       - ../.env
       - ./.env/runtime.env
     environment:
-      SEARXNG_BASE_URL: "http://127.0.0.1:18080"
+      SEARXNG_BASE_URL: "http://searxng:8080"
     volumes:
       - ./config:/config:ro
       - ./volumes/workspaces:/workspace/workspaces
       - ./volumes/logs:/workspace/logs
-    network_mode: host
-    privileged: true
     cap_add:
       - NET_ADMIN
       - NET_RAW
     devices:
       - /dev/net/tun:/dev/net/tun
+    networks:
+      - cerberus-bridge
     stdin_open: true
     tty: true
+    pids_limit: 100
     depends_on:
       cerberus-dashboard:
-        condition: service_started
+        condition: service_healthy
       qdrant:
         condition: service_started
       searxng:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "command -v cerberus >/dev/null && test -d \"${CERBERUS_WORKSPACE_ROOT:-/workspace/workspaces}\" && kill -0 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     stop_grace_period: 45s
-    restart: unless-stopped
+    restart: on-failure
+    deploy:
+      restart_policy:
+        max_attempts: 5
 
   redis:
     image: redis:alpine
@@ -69,13 +87,15 @@ services:
       - "6379:6379"
     volumes:
       - ./volumes/redis:/data
+    networks:
+      - cerberus-bridge
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
     stop_grace_period: 60s
-    restart: unless-stopped
+    restart: "no"
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -87,8 +107,10 @@ services:
       - "6334:6334"
     volumes:
       - ./volumes/qdrant:/qdrant/storage
+    networks:
+      - cerberus-bridge
     stop_grace_period: 45s
-    restart: unless-stopped
+    restart: "no"
 
   searxng:
     image: docker.io/searxng/searxng:latest
@@ -100,11 +122,13 @@ services:
     volumes:
       - ./searxng/core-config:/etc/searxng
       - ./volumes/searxng-cache:/var/cache/searxng
+    networks:
+      - cerberus-bridge
     depends_on:
       valkey:
         condition: service_started
     stop_grace_period: 30s
-    restart: unless-stopped
+    restart: "no"
 
   valkey:
     image: docker.io/valkey/valkey:9-alpine
@@ -112,5 +136,11 @@ services:
     command: valkey-server --save 30 1 --loglevel warning
     volumes:
       - ./volumes/searxng-valkey:/data
+    networks:
+      - cerberus-bridge
     stop_grace_period: 30s
-    restart: unless-stopped
+    restart: "no"
+
+networks:
+  cerberus-bridge:
+    driver: bridge

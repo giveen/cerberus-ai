@@ -100,6 +100,21 @@ _URL_RE = re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'\"`]+")
 _NETWORK_TOKEN_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b")
 
 
+def is_path_contained(workspace_root: str | Path, suspicious_path: str | Path) -> bool:
+    """Return True when suspicious_path resolves within workspace_root.
+
+    Uses resolve(strict=False) to preserve the legacy os.path.realpath behavior
+    for non-existent paths.
+    """
+    resolved_root = Path(workspace_root).resolve(strict=False)
+    resolved_candidate = Path(suspicious_path).resolve(strict=False)
+    try:
+        resolved_candidate.relative_to(resolved_root)
+        return True
+    except ValueError:
+        return False
+
+
 @dataclass
 class PolicyFinding:
     tier: int
@@ -175,10 +190,14 @@ class PolicyEngine:
 
     def __init__(self, *, workspace_dir: str | None = None, project_id: str | None = None) -> None:
         workspace = (workspace_dir or os.getenv("CERBERUS_WORKSPACE_ACTIVE_ROOT") or os.getcwd()).strip()
-        self.workspace_root = Path(workspace).resolve()
+        self.workspace_root = Path(workspace).resolve(strict=False)
         self.project_id = self._normalize_project_id(project_id or os.getenv("CERBERUS_PROJECT_ID") or "")
         self.workspaces_root = self._resolve_workspaces_root(self.workspace_root)
-        self.project_root = (self.workspaces_root / self.project_id).resolve() if self.project_id else self.workspaces_root
+        self.project_root = (
+            (self.workspaces_root / self.project_id).resolve(strict=False)
+            if self.project_id
+            else self.workspaces_root.resolve(strict=False)
+        )
 
     def verify(self, action: dict[str, Any]) -> PolicyReport:
         """Evaluate a proposed action against the four-tier policy engine."""
@@ -482,7 +501,7 @@ class PolicyEngine:
     ) -> list[PolicyFinding]:
         findings: list[PolicyFinding] = []
         normalized_calls = [self._normalize_planned_call(call) for call in planned_calls]
-        project_root_real = Path(os.path.realpath(self.project_root))
+        project_root_real = self.project_root.resolve(strict=False)
         allowed_roots = [project_root_real]
 
         for call in normalized_calls:
@@ -492,7 +511,7 @@ class PolicyEngine:
                 normalized = self._normalize_local_path(path_text)
                 if normalized is None:
                     continue
-                candidate_real = Path(os.path.realpath(normalized))
+                candidate_real = Path(normalized).resolve(strict=False)
                 if self._is_under_any_root(candidate_real, allowed_roots):
                     continue
                 findings.append(
@@ -726,41 +745,45 @@ class PolicyEngine:
 
         candidate = candidate.replace("\\", "/")
         if candidate.startswith("~"):
-            return os.path.realpath(os.path.expanduser(candidate))
-        if os.path.isabs(candidate):
-            return os.path.realpath(candidate)
+            return str(Path(candidate).expanduser().resolve(strict=False))
+
+        candidate_path = Path(candidate)
+        if candidate_path.is_absolute():
+            return str(candidate_path.resolve(strict=False))
         if candidate in {".", "./"}:
-            return os.path.realpath(self.project_root)
+            return str(self.project_root.resolve(strict=False))
         if candidate.startswith("./workspaces/"):
             suffix = candidate[len("./workspaces/"):]
-            return os.path.realpath(self.workspaces_root / suffix)
+            return str((self.workspaces_root / suffix).resolve(strict=False))
         if candidate.startswith("workspaces/"):
             suffix = candidate[len("workspaces/"):]
-            return os.path.realpath(self.workspaces_root / suffix)
+            return str((self.workspaces_root / suffix).resolve(strict=False))
         if self.project_id and (candidate == self.project_id or candidate.startswith(f"{self.project_id}/")):
-            return os.path.realpath(self.workspaces_root / candidate)
+            return str((self.workspaces_root / candidate).resolve(strict=False))
         if candidate.startswith("./"):
-            return os.path.realpath(self.project_root / candidate[2:])
-        return os.path.realpath(self.project_root / candidate)
+            return str((self.project_root / candidate[2:]).resolve(strict=False))
+        return str((self.project_root / candidate).resolve(strict=False))
 
     @staticmethod
     def _is_under_any_root(path: Path, roots: list[Path]) -> bool:
-        for root in roots:
+        resolved_path = path.resolve(strict=False)
+        resolved_roots = [root.resolve(strict=False) for root in roots]
+        for root in resolved_roots:
             try:
-                path.relative_to(root.resolve())
+                resolved_path.relative_to(root)
                 return True
-            except Exception:
+            except ValueError:
                 continue
         return False
 
     @staticmethod
     def _resolve_workspaces_root(workspace_root: Path) -> Path:
         if workspace_root.name == "workspaces":
-            return workspace_root.resolve()
+            return workspace_root.resolve(strict=False)
         for root in (workspace_root, *workspace_root.parents):
             if root.name == "workspaces":
-                return root.resolve()
-        return (workspace_root / "workspaces").resolve()
+                return root.resolve(strict=False)
+        return (workspace_root / "workspaces").resolve(strict=False)
 
     def _coerce_action_to_call(self, action: dict[str, Any]) -> dict[str, Any]:
         tool_name = str(action.get("tool_name") or "").strip()
@@ -957,7 +980,7 @@ class PolicyEngine:
                 continue
             if stripped.startswith("-"):
                 continue
-            return os.path.basename(stripped)
+            return Path(stripped).name
         return ""
 
     @staticmethod

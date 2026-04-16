@@ -18,6 +18,7 @@ import time
 import hashlib
 import json
 import datetime as _dt
+from pathlib import Path
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Type
@@ -194,8 +195,8 @@ def _active_workspace_scope() -> Dict[str, Optional[str]]:
         or os.getenv("CIR_WORKSPACE")
         or "/workspace"
     )
-    workspace_root = os.path.realpath(os.path.expanduser(str(workspace_root or "/workspace")))
-    workspace_id = os.getenv("CERBERUS_WORKSPACE") or os.path.basename(workspace_root.rstrip("/"))
+    workspace_root = str(Path(str(workspace_root or "/workspace")).expanduser().resolve(strict=False))
+    workspace_id = os.getenv("CERBERUS_WORKSPACE") or Path(workspace_root).name
     session_id = os.getenv("CERBERUS_SESSION_ID") or os.getenv("SESSION_ID")
     return {
         "workspace_root": workspace_root,
@@ -211,7 +212,7 @@ def _normalize_workspace_marker(value: Any) -> Optional[str]:
     if not text:
         return None
     if text.startswith("/") or text.startswith("~"):
-        return os.path.realpath(os.path.expanduser(text))
+        return str(Path(text).expanduser().resolve(strict=False))
     return text
 
 
@@ -623,8 +624,8 @@ class MemPalaceAdapter(VectorDBAdapter):
     def health_check(self) -> Dict[str, Any]:
         # Check palace path existence first
         try:
-            path = os.path.expanduser(self.palace_path)
-            if os.path.exists(path):
+            path = Path(self.palace_path).expanduser()
+            if path.exists():
                 return {"ok": True, "details": f"palace_path exists: {path}"}
         except Exception:
             pass
@@ -726,7 +727,7 @@ class LocalFallbackAdapter(VectorDBAdapter):
         self._faiss_maps: Dict[str, List[int]] = {}
 
         # Persistence / background IO
-        self._persist_dir = os.path.expanduser(os.getenv("CERBERUS_LOCAL_PERSIST_DIR", "~/.cerberus/memory/local/"))
+        self._persist_dir = str(Path(os.getenv("CERBERUS_LOCAL_PERSIST_DIR", "~/.cerberus/memory/local/")).expanduser())
         try:
             os.makedirs(self._persist_dir, exist_ok=True)
         except Exception:
@@ -819,9 +820,10 @@ class LocalFallbackAdapter(VectorDBAdapter):
 
     def _asset_paths(self, collection_name: str):
         safe = self._safe_collection_filename(collection_name)
-        idx_path = os.path.join(self._persist_dir, f"{safe}.index")
-        json_path = os.path.join(self._persist_dir, f"{safe}.json")
-        lock_path = os.path.join(self._persist_dir, f"{safe}.lock")
+        persist_dir = Path(self._persist_dir)
+        idx_path = str(persist_dir / f"{safe}.index")
+        json_path = str(persist_dir / f"{safe}.json")
+        lock_path = str(persist_dir / f"{safe}.lock")
         return idx_path, json_path, lock_path
 
     def _claim_collection_lock(self, collection_name: str, timeout: float = 0.0) -> bool:
@@ -886,7 +888,7 @@ class LocalFallbackAdapter(VectorDBAdapter):
         and _faiss_maps. Returns True on successful load.
         """
         idx_path, json_path, lock_path = self._asset_paths(collection_name)
-        if not os.path.exists(json_path) or not os.path.exists(idx_path):
+        if not Path(json_path).exists() or not Path(idx_path).exists():
             return False
 
         # Try to claim lock for exclusive ownership; if we fail, still try
@@ -985,7 +987,7 @@ class LocalFallbackAdapter(VectorDBAdapter):
                 os.replace(tmp_json, json_path)
             finally:
                 try:
-                    if os.path.exists(tmp_json):
+                    if Path(tmp_json).exists():
                         os.remove(tmp_json)
                 except Exception:
                     pass
@@ -999,7 +1001,7 @@ class LocalFallbackAdapter(VectorDBAdapter):
                     os.replace(tmp_idx, idx_path)
                 except Exception:
                     try:
-                        if os.path.exists(tmp_idx):
+                        if Path(tmp_idx).exists():
                             os.remove(tmp_idx)
                     except Exception:
                         pass

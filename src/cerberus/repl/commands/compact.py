@@ -29,6 +29,7 @@ import datetime
 import json
 import os
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from rich.console import Console
@@ -658,19 +659,21 @@ class CompactCommand(Command):
         compacted: List[Any],
     ) -> None:
         """Write a timestamped checkpoint JSON to the workspace directory."""
-        workspace_dir: Optional[str] = None
+        workspace_dir: Optional[Path] = None
 
         # Try session workspace
         if self._session and self._session.workspace:
             ws = self._session.workspace
-            workspace_dir = str(ws) if isinstance(ws, str) else getattr(ws, "path", None)
+            raw_workspace = str(ws) if isinstance(ws, str) else getattr(ws, "path", None)
+            if raw_workspace:
+                workspace_dir = Path(raw_workspace)
 
         if not workspace_dir:
-            workspace_dir = os.getcwd()
+            workspace_dir = Path.cwd()
 
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = re.sub(r"[^\w\-]", "_", agent_name)
-        filename = os.path.join(workspace_dir, f"compact_checkpoint_{safe_name}_{ts}.json")
+        filename = workspace_dir / f"compact_checkpoint_{safe_name}_{ts}.json"
 
         try:
             payload: Dict[str, Any] = {

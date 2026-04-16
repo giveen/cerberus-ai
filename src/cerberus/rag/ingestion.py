@@ -15,6 +15,7 @@ from __future__ import annotations
 import threading
 import time
 import traceback
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import os
 
@@ -280,7 +281,7 @@ class PathGuardIngestionManager:
     ) -> None:
         self.ingestor = ingestor
         self.workspace = workspace or os.getenv("CIR_WORKSPACE", "/workspace")
-        self.loot_dir = loot_dir or os.path.join(self.workspace, "loot")
+        self.loot_dir = str(loot_dir or Path(self.workspace) / "loot")
         self.poll_interval = float(poll_interval)
         self.collection = collection
         self.chunk_size = int(chunk_size)
@@ -308,13 +309,13 @@ class PathGuardIngestionManager:
             except Exception:
                 return None
         else:
-            import os.path as _osp
-            resolved_raw = _osp.realpath(filepath)
-            workspace_real = _osp.realpath(self.workspace)
-            if not (resolved_raw == workspace_real or
-                    resolved_raw.startswith(workspace_real + os.sep)):
+            resolved_raw = Path(filepath).resolve()
+            workspace_real = Path(self.workspace).resolve()
+            try:
+                resolved_raw.relative_to(workspace_real)
+            except ValueError:
                 return None
-            resolved = resolved_raw
+            resolved = str(resolved_raw)
         try:
             with open(resolved, "r", encoding="utf-8", errors="replace") as fh:
                 return fh.read()
@@ -355,10 +356,11 @@ class PathGuardIngestionManager:
     def _poll_loop(self) -> None:
         while not self._stop.is_set():
             try:
-                if os.path.isdir(self.loot_dir):
-                    for fname in os.listdir(self.loot_dir):
-                        fpath = os.path.join(self.loot_dir, fname)
-                        if fpath not in self._seen_files and os.path.isfile(fpath):
+                loot_path = Path(self.loot_dir)
+                if loot_path.is_dir():
+                    for fname in loot_path.iterdir():
+                        fpath = str(fname)
+                        if fpath not in self._seen_files and fname.is_file():
                             self._seen_files.add(fpath)
                             try:
                                 self.ingest_file(fpath)

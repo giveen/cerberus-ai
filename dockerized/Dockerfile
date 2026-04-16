@@ -76,8 +76,9 @@ CMD ["reflex", "run", "--env", "prod", "--backend-host", "0.0.0.0", "--frontend-
 FROM kalilinux/kali-rolling AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    PIP_BREAK_SYSTEM_PACKAGES=1 \
-    CERBERUS_WORKSPACE_ROOT=/workspace/workspaces
+    CERBERUS_WORKSPACE_ROOT=/workspace/workspaces \
+    VIRTUAL_ENV=/opt/cerberus-venv \
+    PATH="/opt/cerberus-venv/bin:$PATH"
 
 WORKDIR /workspace
 
@@ -89,6 +90,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     kali-tools-top10 \
     python3 \
     python3-pip \
+    python3-venv \
     tini \
     && rm -rf /var/lib/apt/lists/*
 
@@ -96,8 +98,9 @@ COPY . .
 COPY dockerized/entrypoint.sh /usr/local/bin/cerberus-entrypoint
 
 RUN chmod +x /usr/local/bin/cerberus-entrypoint \
-    && python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && python3 -m pip install --no-cache-dir --ignore-installed . \
+    && python3 -m venv "$VIRTUAL_ENV" \
+    && "$VIRTUAL_ENV/bin/python" -m pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && "$VIRTUAL_ENV/bin/python" -m pip install --no-cache-dir . \
     && command -v nmap \
     && command -v msfconsole \
     && command -v sqlmap

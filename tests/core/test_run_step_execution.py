@@ -371,6 +371,62 @@ async def test_runner_blocks_empty_required_tool_args_before_execution():
 
 
 @pytest.mark.asyncio
+async def test_runner_returns_malformed_json_hint_before_tool_execution():
+    call_counter = {"count": 0}
+
+    @function_tool(name_override="required_tool")
+    def required_tool(url: str) -> str:
+        call_counter["count"] += 1
+        return f"fetched {url}"
+
+    agent = Agent(name="test", tools=[required_tool])
+    response = ModelResponse(
+        output=[get_function_tool_call("required_tool", "{url: https://example.com")],
+        usage=Usage(),
+        referenceable_id=None,
+    )
+    context_wrapper = RunContextWrapper(None)
+
+    result = await get_execute_result(agent, response, context_wrapper=context_wrapper)
+
+    assert call_counter["count"] == 0
+    assert isinstance(result.next_step, NextStepRunAgain)
+    assert isinstance(result.generated_items[1], ToolCallOutputItem)
+    assert "Error: Malformed JSON arguments. Please ensure you output a valid JSON object." in str(
+        result.generated_items[1].raw_item["output"]
+    )
+    assert context_wrapper.last_tool_validation["error"] == "tool_arguments_malformed_json"
+    assert context_wrapper.last_tool_validation["malformed_json"] is True
+
+
+@pytest.mark.asyncio
+async def test_runner_returns_specific_missing_required_field_hint():
+    call_counter = {"count": 0}
+
+    @function_tool(name_override="nmap")
+    def nmap(target: str, args: str) -> str:
+        call_counter["count"] += 1
+        return f"scanned {target} {args}"
+
+    agent = Agent(name="test", tools=[nmap])
+    response = ModelResponse(
+        output=[get_function_tool_call("nmap", json.dumps({"args": "-p 80"}))],
+        usage=Usage(),
+        referenceable_id=None,
+    )
+    context_wrapper = RunContextWrapper(None)
+
+    result = await get_execute_result(agent, response, context_wrapper=context_wrapper)
+
+    assert call_counter["count"] == 0
+    assert isinstance(result.next_step, NextStepRunAgain)
+    assert isinstance(result.generated_items[1], ToolCallOutputItem)
+    assert "Error: Missing required field: 'target'." in str(result.generated_items[1].raw_item["output"])
+    assert context_wrapper.last_tool_validation["error"] == "tool_arguments_missing_required_fields"
+    assert "target" in context_wrapper.last_tool_validation["missing_required_fields"]
+
+
+@pytest.mark.asyncio
 async def test_format_violation_after_tool_validation_forces_correction_turn():
     agent = Agent(name="test")
     response = ModelResponse(

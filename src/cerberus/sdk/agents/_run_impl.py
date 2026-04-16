@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
 import inspect
 import json
 import os
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from openai.types.responses import (
@@ -238,6 +240,20 @@ class NextStepRunAgain:
     pass
 
 
+@dataclass(frozen=True)
+class CerberusHandoffEnvelope:
+    """Cerberus-native sub-agent handoff metadata for explicit state transfer."""
+
+    protocol: str
+    from_agent: str
+    to_agent_hint: str
+    tool_call_id: str
+    arguments_hash: str
+    generated_at_utc: str
+    pre_handoff_count: int
+    turn_item_count: int
+
+
 @dataclass
 class SingleStepResult:
     original_input: str | list[TResponseInputItem]
@@ -316,6 +332,91 @@ class RunImpl:
                 }
             ],
         }
+
+    @staticmethod
+    def _build_handoff_envelope(
+        *,
+        from_agent: Agent[Any],
+        handoff: Handoff[Any],
+        tool_call: ResponseFunctionToolCall,
+        pre_step_items: list[RunItem],
+        new_step_items: list[RunItem],
+    ) -> CerberusHandoffEnvelope:
+        arguments = tool_call.arguments or ""
+        arguments_hash = hashlib.sha256(arguments.encode("utf-8", errors="ignore")).hexdigest()[:16]
+        return CerberusHandoffEnvelope(
+            protocol="cerberus.handoff.v1",
+            from_agent=from_agent.name,
+            to_agent_hint=handoff.agent_name,
+            tool_call_id=tool_call.call_id,
+            arguments_hash=arguments_hash,
+            generated_at_utc=datetime.now(UTC).isoformat(),
+            pre_handoff_count=len(pre_step_items),
+            turn_item_count=len(new_step_items),
+        )
+
+    @staticmethod
+    def _handoff_state_input_item(envelope: CerberusHandoffEnvelope) -> TResponseInputItem:
+        payload = {
+            "protocol": envelope.protocol,
+            "from_agent": envelope.from_agent,
+            "to_agent_hint": envelope.to_agent_hint,
+            "tool_call_id": envelope.tool_call_id,
+            "arguments_hash": envelope.arguments_hash,
+            "generated_at_utc": envelope.generated_at_utc,
+            "pre_handoff_count": envelope.pre_handoff_count,
+            "turn_item_count": envelope.turn_item_count,
+        }
+        return {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "[CERBERUS_HANDOFF_STATE] " + json.dumps(payload, ensure_ascii=True),
+                }
+            ],
+        }
+
+    @classmethod
+    async def _invoke_handoff_agent(
+        cls,
+        *,
+        handoff: Handoff[Any],
+        context_wrapper: RunContextWrapper[Any],
+        arguments: str,
+        envelope: CerberusHandoffEnvelope,
+    ) -> Agent[Any]:
+        envelope_handler = getattr(handoff, "on_invoke_handoff_envelope", None)
+        if callable(envelope_handler):
+            logger.debug(
+                "Using envelope-based handoff invocation for %s via %s",
+                handoff.agent_name,
+                envelope.protocol,
+            )
+            return await envelope_handler(context_wrapper, arguments, envelope)
+        return await handoff.on_invoke_handoff(context_wrapper, arguments)
+
+    @staticmethod
+    def _persist_interrupted_tool_outputs(tool_output_items: list[RunItem]) -> None:
+        """Best-effort persistence of interrupted tool outputs into active model history."""
+        try:
+            from .models.openai_chatcompletions import get_current_active_model
+
+            active_model = get_current_active_model()
+            if active_model is None or not hasattr(active_model, "add_to_message_history"):
+                return
+
+            for item in tool_output_items:
+                if not isinstance(item, ToolCallOutputItem):
+                    continue
+                try:
+                    input_item = item.to_input_item()
+                    if isinstance(input_item, dict) and input_item.get("role") == "tool":
+                        active_model.add_to_message_history(input_item)
+                except Exception as exc:
+                    logger.warning("Failed to persist interrupted tool output item: %s", exc)
+        except Exception as exc:
+            logger.warning("Failed to persist interrupted tool outputs: %s", exc)
 
     @staticmethod
     def _reflect_input_item(message: str) -> TResponseInputItem:
@@ -428,8 +529,15 @@ class RunImpl:
             )
             error_code = "tool_arguments_empty_required_fields"
         else:
+            missing_hint = (
+                f"Error: Missing required field: '{missing_fields[0]}'. "
+                "You must provide this field according to the schema. "
+                if missing_fields
+                else ""
+            )
             message = (
-                f"CRITICAL FAILURE: Tool call for {tool_name} is missing required arguments: "
+                missing_hint
+                + f"CRITICAL FAILURE: Tool call for {tool_name} is missing required arguments: "
                 f"{', '.join(missing_fields)}. You must re-read the tool schema. "
                 f"Required fields are: {fields_text}. Repeat the call with ALL fields populated."
             )
@@ -444,6 +552,35 @@ class RunImpl:
             "missing_required_fields": missing_fields,
             "required_fields": required_fields,
             "empty_arguments": empty_args,
+            "raw_input_preview": raw_arguments[:800],
+        }
+
+    @classmethod
+    def _build_runner_tool_malformed_json_error(
+        cls,
+        *,
+        tool_name: str,
+        raw_arguments: str,
+        params_json_schema: dict[str, Any],
+    ) -> dict[str, Any]:
+        required_fields = _required_fields_from_schema(params_json_schema)
+        retry_hint = _build_schema_retry_hint(tool_name, params_json_schema)
+        fields_text = ", ".join(required_fields) if required_fields else "(none declared)"
+        message = (
+            "Error: Malformed JSON arguments. Please ensure you output a valid JSON object. "
+            f"Tool: {tool_name}. Required fields: {fields_text}."
+        )
+
+        return {
+            "ok": False,
+            "error": "tool_arguments_malformed_json",
+            "tool": tool_name,
+            "message": message,
+            **retry_hint,
+            "missing_required_fields": list(required_fields),
+            "required_fields": required_fields,
+            "empty_arguments": False,
+            "malformed_json": True,
             "raw_input_preview": raw_arguments[:800],
         }
 
@@ -473,7 +610,11 @@ class RunImpl:
         try:
             parsed_arguments = parse_json_lenient(normalized_arguments, prefer_last=True)
         except ValueError:
-            return None
+            return cls._build_runner_tool_malformed_json_error(
+                tool_name=tool_name,
+                raw_arguments=normalized_arguments,
+                params_json_schema=params_json_schema,
+            )
 
         if not isinstance(parsed_arguments, dict) or not parsed_arguments:
             return cls._build_runner_tool_validation_error(
@@ -635,6 +776,8 @@ class RunImpl:
         
         # Re-raise the interruption after ensuring results are added
         if interrupt_exception:
+            cls._persist_interrupted_tool_outputs([result.run_item for result in function_results])
+            cls._persist_interrupted_tool_outputs(computer_results)
             raise interrupt_exception
 
         # Second, check if there are any handoffs
@@ -1249,8 +1392,19 @@ class RunImpl:
         actual_handoff = run_handoffs[0]
         with handoff_span(from_agent=agent.name) as span_handoff:
             handoff = actual_handoff.handoff
-            new_agent: Agent[Any] = await handoff.on_invoke_handoff(
-                context_wrapper, actual_handoff.tool_call.arguments
+            envelope = cls._build_handoff_envelope(
+                from_agent=agent,
+                handoff=handoff,
+                tool_call=actual_handoff.tool_call,
+                pre_step_items=pre_step_items,
+                new_step_items=new_step_items,
+            )
+
+            new_agent: Agent[Any] = await cls._invoke_handoff_agent(
+                handoff=handoff,
+                context_wrapper=context_wrapper,
+                arguments=actual_handoff.tool_call.arguments,
+                envelope=envelope,
             )
             span_handoff.span_data.to_agent = new_agent.name
             if multiple_handoffs:
@@ -1294,6 +1448,11 @@ class RunImpl:
                     else _coro.noop_coroutine()
                 ),
             )
+
+            # Explicitly pass Cerberus-native handoff state to the next agent turn.
+            bridged_input = ItemHelpers.input_to_new_input_list(original_input)
+            bridged_input.append(cls._handoff_state_input_item(envelope))
+            original_input = bridged_input
 
             # If there's an input filter, filter the input for the next agent
             input_filter = handoff.input_filter or (

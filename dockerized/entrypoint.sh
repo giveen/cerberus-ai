@@ -11,9 +11,6 @@ fi
 if [ -z "${CERBERUS_API_KEY:-}" ] && [ -n "${ALIAS_API_KEY:-}" ]; then
   export CERBERUS_API_KEY="$ALIAS_API_KEY"
 fi
-if [ -z "${OPENAI_API_KEY:-}" ] && [ -n "${CERBERUS_API_KEY:-}" ]; then
-  export OPENAI_API_KEY="$CERBERUS_API_KEY"
-fi
 if [ -z "${CERBERUS_API_BASE:-}" ] && [ -n "${CEREBRO_API_BASE:-}" ]; then
   export CERBERUS_API_BASE="$CEREBRO_API_BASE"
 fi

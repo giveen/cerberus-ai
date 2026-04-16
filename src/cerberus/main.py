@@ -52,12 +52,16 @@ from cerberus.sdk.agents.run_context import RunContextWrapper
 from cerberus.sdk.agents.tool import FunctionTool
 from cerberus.tools.all_tools import get_tool_registry
 from cerberus.tools.reconnaissance.filesystem import PathGuard
-from cerberus.utils.process_handler import run_streaming_subprocess, streaming_runtime, terminate_session_task
+from cerberus.utils.process_handler import (
+    run_streaming_subprocess,
+    streaming_runtime,
+    terminate_all_session_tasks,
+    terminate_session_task,
+)
 from cerberus.util.config import (
     get_effective_api_base,
     get_effective_api_key,
     get_effective_model,
-    should_suppress_openai_api_key_warning,
 )
 from cerberus.verification.policy_engine import PolicyEngine
 
@@ -288,7 +292,7 @@ async def _invoke_streamable_tool(
                     default=str(env.get("CERBERUS_API_BASE") or env.get("CEREBRO_API_BASE") or "http://localhost:8000/v1")
                 ),
                 "CERBERUS_API_KEY": get_effective_api_key(
-                    default=str(env.get("CERBERUS_API_KEY") or env.get("CEREBRO_API_KEY") or "sk-cerberus-1234567890")
+                    default=str(env.get("CERBERUS_API_KEY") or env.get("CEREBRO_API_KEY") or "")
                 ),
                 "CERBERUS_WORKSPACE_ACTIVE_ROOT": str(project_root),
                 "CERBERUS_WORKSPACE_DIR": str(workspaces_root),
@@ -1268,17 +1272,29 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _register_main_thread_signals(loop: asyncio.AbstractEventLoop, stop_event: asyncio.Event) -> None:
     """Register SIGINT/SIGTERM handlers in the main thread before loop run."""
+    cleanup_scheduled = False
+
+    def _request_shutdown(signum: signal.Signals) -> None:
+        nonlocal cleanup_scheduled
+        loop.call_soon_threadsafe(stop_event.set)
+        if signum != signal.SIGTERM or cleanup_scheduled:
+            return
+
+        cleanup_scheduled = True
+
+        def _schedule_cleanup() -> None:
+            try:
+                loop.create_task(terminate_all_session_tasks(grace_seconds=3.0))
+            except RuntimeError:
+                pass
+
+        loop.call_soon_threadsafe(_schedule_cleanup)
+
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(sig, lambda: loop.call_soon_threadsafe(stop_event.set))
+            loop.add_signal_handler(sig, lambda sig=sig: _request_shutdown(sig))
         except NotImplementedError:  # pragma: no cover
-            signal.signal(sig, lambda *_args: loop.call_soon_threadsafe(stop_event.set))
-
-
-def _suppress_local_openai_trace_warning() -> None:
-    """Silence OPENAI_API_KEY exporter warnings in local transparent mode."""
-    if should_suppress_openai_api_key_warning() and not os.getenv("OPENAI_API_KEY"):
-        os.environ["OPENAI_API_KEY"] = "local-trace-suppressed"
+            signal.signal(sig, lambda *_args, sig=sig: _request_shutdown(sig))
 
 
 def _resolve_scope_into_env(scope_path: str, workspace_root: Path) -> None:
@@ -1368,7 +1384,6 @@ def main(*, register_main_thread_signals: bool = True) -> int:
 
     workspace_root = Path(str(args.workspace)).resolve()
     os.environ["CIR_WORKSPACE"] = str(workspace_root)
-    _suppress_local_openai_trace_warning()
 
     if args.scope:
         try:

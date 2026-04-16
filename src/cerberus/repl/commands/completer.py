@@ -34,6 +34,7 @@ import os
 import threading
 import time
 from functools import lru_cache
+from pathlib import Path
 from typing import Dict, Generator, Iterable, List, Optional, Tuple
 
 from prompt_toolkit.completion import Completer, Completion   # type: ignore[import-untyped]
@@ -302,7 +303,7 @@ class _PathSource:
     """
 
     @staticmethod
-    def _workspace_root() -> Optional[str]:
+    def _workspace_root() -> Optional[Path]:
         session = get_session()
         ws = session.workspace
         if ws is None:
@@ -310,7 +311,7 @@ class _PathSource:
         raw = str(ws) if isinstance(ws, str) else getattr(ws, "path", None)
         if not raw:
             return None
-        return os.path.realpath(raw)
+        return Path(raw).resolve(strict=False)
 
     @classmethod
     def completions(cls, partial: str) -> List[Tuple[str, bool]]:
@@ -328,38 +329,40 @@ class _PathSource:
         if not root:
             return []
 
-        search_dir: str
+        search_dir: Path
         prefix: str
         if partial:
-            candidate = os.path.join(root, partial)
-            if os.path.isdir(candidate):
+            candidate = (root / partial)
+            if candidate.is_dir():
                 search_dir = candidate
                 prefix = partial.rstrip("/") + "/"
             else:
-                search_dir = os.path.dirname(candidate) or root
+                search_dir = candidate.parent
                 prefix = partial
         else:
             search_dir = root
             prefix = ""
 
         # Guard against escaping workspace
-        real_dir = os.path.realpath(search_dir)
-        if not real_dir.startswith(root):
+        real_dir = search_dir.resolve(strict=False)
+        try:
+            real_dir.relative_to(root)
+        except ValueError:
             return []
 
         try:
-            entries = os.scandir(real_dir)
+            entries = list(real_dir.iterdir())
         except OSError:
             return []
 
         results: List[Tuple[str, bool]] = []
-        fragment = os.path.basename(partial) if partial else ""
+        fragment = Path(partial).name if partial else ""
         for entry in entries:
             if entry.name.startswith("."):
                 continue  # Skip hidden entries
             if not entry.name.startswith(fragment):
                 continue
-            rel = os.path.relpath(entry.path, root)
+            rel = entry.relative_to(root).as_posix()
             results.append((rel, entry.is_dir()))
         return results
 

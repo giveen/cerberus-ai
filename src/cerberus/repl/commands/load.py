@@ -807,7 +807,8 @@ class LoadCommand(Command):
             or lowered.endswith(".jsonl")
             or lowered.endswith(".json")
             or token.startswith(("./", "../", "/", "~"))
-            or os.path.sep in token
+            or "/" in token
+            or "\\" in token
         )
 
     def _get_existing_history(self, agent_name: str, manager: Any) -> List[Dict[str, Any]]:

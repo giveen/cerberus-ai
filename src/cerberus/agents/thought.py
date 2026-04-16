@@ -546,7 +546,7 @@ def cec_think_act_observe(
 
 
 load_dotenv(override=False)
-api_key = os.getenv("CERBERUS_API_KEY", os.getenv("OPENAI_API_KEY", "sk-cerebro-1234567890"))
+api_key = os.getenv("CERBERUS_API_KEY", os.getenv("OPENAI_API_KEY", ""))
 
 thought_agent_system_prompt = load_prompt_template("prompts/system_thought_router.md")
 thought_agent = Agent(

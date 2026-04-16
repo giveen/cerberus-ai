@@ -44,6 +44,8 @@ cai_venv/
 coverage.xml
 htmlcov/
 pytest_failures/
+.pytest_failures/
+test-results/
 
 # Runtime and generated data
 .cai/
@@ -64,6 +66,6 @@ dockerized/logs/
 dockerized/qdrant_data/
 dockerized/volumes/*
 !dockerized/volumes/.gitkeep
-.pytest_failures/
+tmp_test_run/
 workspaces/*
 !workspaces/.gitkeep

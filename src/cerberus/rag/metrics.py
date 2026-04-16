@@ -78,14 +78,15 @@ class _RAGAuditWriter:
     def __init__(self) -> None:
         import queue as _queue
         import os as _os
+        from pathlib import Path as _Path
         self._queue: "_queue.Queue[Dict[str, Any]]" = _queue.Queue()
         workspace = _os.getenv("CIR_WORKSPACE", "/workspace")
-        log_dir = _os.path.join(workspace, "logs")
+        log_path = _Path(workspace) / "logs"
         try:
-            _os.makedirs(log_dir, exist_ok=True)
+            log_path.mkdir(parents=True, exist_ok=True)
         except Exception:
-            log_dir = "/tmp"
-        self._path = _os.path.join(log_dir, "rag_audit.jsonl")
+            log_path = _Path("/tmp")
+        self._path = log_path / "rag_audit.jsonl"
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._writer_loop, daemon=True, name="rag-audit-writer"
@@ -107,7 +108,7 @@ class _RAGAuditWriter:
                 event = self._queue.get(timeout=0.5)
                 try:
                     line = _json.dumps(event, default=str) + "\n"
-                    with open(self._path, "a", encoding="utf-8") as fh:
+                    with self._path.open("a", encoding="utf-8") as fh:
                         fh.write(line)
                 except Exception:
                     pass

@@ -48,6 +48,7 @@ where:
 import importlib
 import os
 import pkgutil
+from pathlib import Path
 from typing import Dict
 
 try:
@@ -90,6 +91,8 @@ model = os.environ.get("CERBERUS_MODEL", "cerebro1")
 
 
 PATTERNS = ["hierarchical", "swarm", "chain_of_thought", "auction_based", "recursive"]
+_AGENTS_DIR = Path(__file__).parent
+_PATTERNS_DIR = _AGENTS_DIR / "patterns"
 
 
 def get_available_agents() -> Dict[str, Agent]:  # pylint: disable=R0912  # noqa
@@ -122,9 +125,8 @@ def get_available_agents() -> Dict[str, Agent]:  # pylint: disable=R0912  # noqa
             pass
 
     # Also check the patterns subdirectory
-    patterns_path = os.path.join(os.path.dirname(__file__), "patterns")
-    if os.path.exists(patterns_path) and os.path.isdir(patterns_path):  # pylint: disable=R1702  # noqa
-        for _, name, _ in pkgutil.iter_modules([patterns_path], __name__ + ".patterns."):
+    if _PATTERNS_DIR.exists() and _PATTERNS_DIR.is_dir():  # pylint: disable=R1702  # noqa
+        for _, name, _ in pkgutil.iter_modules([str(_PATTERNS_DIR)], __name__ + ".patterns."):
             try:
                 module = importlib.import_module(name)
                 # Look for Agent instances in the patterns module
@@ -201,9 +203,8 @@ def get_agent_module(agent_name: str) -> str:
             pass
 
     # Also check the patterns subdirectory
-    patterns_path = os.path.join(os.path.dirname(__file__), "patterns")
-    if os.path.exists(patterns_path) and os.path.isdir(patterns_path):
-        for _, name, _ in pkgutil.iter_modules([patterns_path], __name__ + ".patterns."):
+    if _PATTERNS_DIR.exists() and _PATTERNS_DIR.is_dir():
+        for _, name, _ in pkgutil.iter_modules([str(_PATTERNS_DIR)], __name__ + ".patterns."):
             try:
                 module = importlib.import_module(name)
                 # Look for Agent instances in the patterns module

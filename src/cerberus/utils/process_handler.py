@@ -70,6 +70,18 @@ _CONTAINER_ENV_KEYS = {
 }
 
 
+def _signal_process_group(pid: Optional[int], sig: signal.Signals) -> bool:
+    """Signal a full process group when available (POSIX)."""
+    if pid is None or os.name == "nt":
+        return False
+    try:
+        pgid = os.getpgid(pid)
+        os.killpg(pgid, sig)
+        return True
+    except Exception:
+        return False
+
+
 def _trim_line(text: str, max_line_chars: int) -> str:
     if max_line_chars <= 0 or len(text) <= max_line_chars:
         return text
@@ -500,6 +512,9 @@ def _signal_process_tree(pid: Optional[int], sig: signal.Signals) -> bool:
     if pid is None:
         return False
 
+    if _signal_process_group(pid, sig):
+        return True
+
     sent = False
     if psutil is not None:
         try:
@@ -566,6 +581,47 @@ async def terminate_session_task(session_id: str, *, grace_seconds: float = 2.0)
     }
 
 
+async def terminate_all_session_tasks(*, grace_seconds: float = 3.0) -> dict[str, Any]:
+    with _PROCESS_REGISTRY_LOCK:
+        session_ids = tuple(_PROCESS_REGISTRY.keys())
+
+    if not session_ids:
+        return {"sessions": {}, "found_sessions": 0, "terminated": 0, "killed": 0, "found": 0}
+
+    results = await asyncio.gather(
+        *(terminate_session_task(session_id, grace_seconds=grace_seconds) for session_id in session_ids),
+        return_exceptions=True,
+    )
+
+    per_session: dict[str, dict[str, Any]] = {}
+    total_terminated = 0
+    total_killed = 0
+    total_found = 0
+    for session_id, result in zip(session_ids, results, strict=False):
+        if isinstance(result, Exception):
+            per_session[session_id] = {
+                "error": str(result),
+                "terminated": 0,
+                "killed": 0,
+                "found": 0,
+                "pids": [],
+            }
+            continue
+
+        per_session[session_id] = result
+        total_terminated += int(result.get("terminated", 0) or 0)
+        total_killed += int(result.get("killed", 0) or 0)
+        total_found += int(result.get("found", 0) or 0)
+
+    return {
+        "sessions": per_session,
+        "found_sessions": len(session_ids),
+        "terminated": total_terminated,
+        "killed": total_killed,
+        "found": total_found,
+    }
+
+
 async def terminate_registered_processes(session_id: str, *, grace_seconds: float = 2.0) -> dict[str, Any]:
     return await terminate_session_task(session_id, grace_seconds=grace_seconds)
 
@@ -614,13 +670,20 @@ async def run_streaming_subprocess(
             timeout_message=timeout_message,
         )
 
+    popen_kwargs: dict[str, Any] = {
+        "cwd": str(cwd),
+        "env": None if env is None else dict(env),
+        "stdin": asyncio.subprocess.DEVNULL,
+        "stdout": asyncio.subprocess.PIPE,
+        "stderr": asyncio.subprocess.PIPE,
+    }
+    if os.name != "nt":
+        # Put each tool execution in its own process group for group-wide termination.
+        popen_kwargs["preexec_fn"] = os.setsid
+
     process = await asyncio.create_subprocess_exec(
         *[str(item) for item in argv],
-        cwd=str(cwd),
-        env=None if env is None else dict(env),
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        **popen_kwargs,
     )
 
     if process.stdout is None or process.stderr is None:
@@ -692,19 +755,13 @@ async def run_streaming_subprocess(
     except asyncio.TimeoutError:
         timed_out = True
         try:
-            if os.name == "nt":
+            if not _signal_process_tree(process.pid, signal.SIGTERM):
                 process.terminate()
-            else:
-                with suppress(ProcessLookupError):
-                    os.kill(process.pid, signal.SIGTERM)
             await asyncio.wait_for(process.wait(), timeout=2.0)
         except Exception:
             if process.returncode is None:
-                if os.name == "nt":
+                if not _signal_process_tree(process.pid, signal.SIGKILL):
                     process.kill()
-                else:
-                    with suppress(ProcessLookupError):
-                        os.kill(process.pid, signal.SIGKILL)
                 with suppress(Exception):
                     await process.wait()
         await emit_stream_event("stderr", timeout_message, callback=event_callback)
@@ -749,6 +806,7 @@ __all__ = [
     "register_process",
     "run_streaming_subprocess",
     "streaming_runtime",
+    "terminate_all_session_tasks",
     "terminate_registered_processes",
     "terminate_session_task",
     "unregister_process",

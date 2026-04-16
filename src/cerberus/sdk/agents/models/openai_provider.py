@@ -13,6 +13,7 @@ from .openai_chatcompletions import OpenAIChatCompletionsModel
 from .openai_responses import OpenAIResponsesModel
 
 DEFAULT_MODEL: str = "gpt-4o"
+_USER_AGENT = "Cerberus-AI"
 
 
 _http_client: httpx.AsyncClient | None = None
@@ -82,7 +83,7 @@ class OpenAIProvider(ModelProvider):
             api_key = (
                 self._stored_api_key
                 or _openai_shared.get_default_openai_key()
-                or os.getenv("OPENAI_API_KEY")
+                or get_effective_api_key()
             )
             base_url = self._stored_base_url
             self._client = AsyncOpenAI(
@@ -91,7 +92,7 @@ class OpenAIProvider(ModelProvider):
                 organization=self._stored_organization,
                 project=self._stored_project,
                 http_client=shared_http_client(),
-                default_headers={"User-Agent": "Cerberus AI Auditor"},
+                default_headers={"User-Agent": _USER_AGENT},
             )
 
         return self._client
@@ -102,9 +103,7 @@ class OpenAIProvider(ModelProvider):
 
         model_lower = model_name.lower()
         if "cerebro" in model_lower:
-            self._stored_api_key = self._stored_api_key or get_effective_api_key(
-                default="sk-cerebro-local"
-            )
+            self._stored_api_key = self._stored_api_key or get_effective_api_key()
             self._stored_base_url = self._stored_base_url or get_effective_api_base()
 
         target_base_url = self._stored_base_url or get_effective_api_base()

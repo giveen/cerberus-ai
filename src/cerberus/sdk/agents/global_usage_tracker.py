@@ -7,6 +7,8 @@ import os
 import threading
 import time
 import platform
+import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -15,6 +17,8 @@ import atexit
 # Import fcntl only on Unix-like systems
 if platform.system() != 'Windows':
     import fcntl
+
+logger = logging.getLogger(__name__)
 
 class GlobalUsageTracker:
     """
@@ -89,8 +93,8 @@ class GlobalUsageTracker:
                     try:
                         self.usage_file.rename(backup_path)
                         print(f"Corrupted usage.json backed up to {backup_path}")
-                    except:
-                        pass
+                    except Exception as exc:
+                        logger.warning("Failed to back up corrupted usage file %s: %s", self.usage_file, exc)
                     break
         
         # Default structure
@@ -108,6 +112,28 @@ class GlobalUsageTracker:
         }
     
     def _save_usage_data(self):
+        """
+        Save usage data, offloading file I/O to an executor when called from a running event loop.
+
+        This prevents synchronous disk operations from blocking async agent workflows.
+        """
+        if not self.enabled:
+            return
+
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # No event loop in this thread (common during process shutdown).
+            self._save_usage_data_sync()
+            return
+
+        if loop.is_running():
+            loop.run_in_executor(None, self._save_usage_data_sync)
+            return
+
+        self._save_usage_data_sync()
+
+    def _save_usage_data_sync(self):
         """Save usage data to file with file locking for concurrent access"""
         if not self.enabled:
             return
@@ -130,8 +156,8 @@ class GlobalUsageTracker:
                             with self._lock:
                                 self.usage_data = current_file_data
                                 # Now our in-memory data has the latest from file
-                except:
-                    pass  # If we can't read, continue with save
+                except Exception as exc:
+                    logger.debug("Skipping stale file pre-merge due to read error: %s", exc)
             
             # Quickly copy data under lock
             with self._lock:
@@ -178,8 +204,8 @@ class GlobalUsageTracker:
                                     if os.getenv("CERBERUS_DEBUG", "1") == "2":
                                         print(f"Skipping save: file cost ({final_file_cost}) > our cost ({our_cost})")
                                     return
-                            except:
-                                pass  # If we can't read, continue with save
+                            except Exception as exc:
+                                logger.debug("Skipping final usage consistency check due to read error: %s", exc)
                         
                         # Atomic rename with retry for concurrent access
                         for rename_attempt in range(3):
@@ -202,18 +228,56 @@ class GlobalUsageTracker:
                         if temp_file.exists():
                             try:
                                 temp_file.unlink()
-                            except:
-                                pass
+                            except Exception as exc:
+                                logger.debug("Could not remove temp usage file %s: %s", temp_file, exc)
                 
         except KeyboardInterrupt:
             # Don't block on Ctrl+C, just skip saving this time
             pass
-        except Exception:
-            # Silently ignore other errors to not disrupt the main program
-            pass
+        except Exception as exc:
+            # Keep the main program alive, but log failures for auditability.
+            logger.warning("Usage tracking save failed: %s", exc)
+
+    @staticmethod
+    def _running_loop() -> Optional[asyncio.AbstractEventLoop]:
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+
+    async def _start_session_async(self, session_id: str, agent_name: Optional[str] = None) -> None:
+        await asyncio.to_thread(self._start_session_sync, session_id, agent_name)
+
+    async def _track_usage_async(
+        self,
+        model_name: str,
+        input_tokens: int,
+        output_tokens: int,
+        cost: float,
+        agent_name: Optional[str] = None,
+    ) -> None:
+        await asyncio.to_thread(
+            self._track_usage_sync,
+            model_name,
+            input_tokens,
+            output_tokens,
+            cost,
+            agent_name,
+        )
+
+    async def _end_session_async(self, final_cost: Optional[float] = None) -> None:
+        await asyncio.to_thread(self._end_session_sync, final_cost)
     
     def start_session(self, session_id: str, agent_name: Optional[str] = None):
         """Start tracking a new session"""
+        loop = self._running_loop()
+        if loop is not None:
+            loop.create_task(self._start_session_async(session_id, agent_name))
+            return
+        self._start_session_sync(session_id, agent_name)
+
+    def _start_session_sync(self, session_id: str, agent_name: Optional[str] = None):
+        """Synchronous session-start implementation."""
         if not self.enabled:
             return
             
@@ -264,6 +328,29 @@ class GlobalUsageTracker:
                    cost: float,
                    agent_name: Optional[str] = None):
         """Track usage for a single model interaction with proper synchronization"""
+        loop = self._running_loop()
+        if loop is not None:
+            loop.create_task(
+                self._track_usage_async(
+                    model_name,
+                    input_tokens,
+                    output_tokens,
+                    cost,
+                    agent_name,
+                )
+            )
+            return
+        self._track_usage_sync(model_name, input_tokens, output_tokens, cost, agent_name)
+
+    def _track_usage_sync(
+        self,
+        model_name: str,
+        input_tokens: int,
+        output_tokens: int,
+        cost: float,
+        agent_name: Optional[str] = None,
+    ):
+        """Synchronous usage-tracking implementation."""
         if not self.enabled:
             return
             
@@ -364,6 +451,14 @@ class GlobalUsageTracker:
     
     def end_session(self, final_cost: Optional[float] = None):
         """End the current session"""
+        loop = self._running_loop()
+        if loop is not None:
+            loop.create_task(self._end_session_async(final_cost))
+            return
+        self._end_session_sync(final_cost)
+
+    def _end_session_sync(self, final_cost: Optional[float] = None):
+        """Synchronous session-end implementation."""
         if not self.enabled:
             return
             
