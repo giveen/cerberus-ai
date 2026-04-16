@@ -37,6 +37,12 @@ class RunContextWrapper(Generic[TContext]):
     last_tool_validation: dict[str, Any] = field(default_factory=dict)
     """Latest runner-level tool validation metadata for repeat-call guidance."""
 
+    pending_approval: dict[str, Any] = field(default_factory=dict)
+    """Pending tool-approval payload surfaced by runner-side validation."""
+
+    pending_approval_decision: dict[str, Any] = field(default_factory=dict)
+    """Operator approval or rejection decision cached for the next tool retry."""
+
     format_correction_count: int = 0
     """How many corrective turns have been injected for format violations in this run."""
 
