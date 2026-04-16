@@ -259,13 +259,38 @@ def _parse_tool_output(value: Any) -> Any:
     return value
 
 
-async def _emit_headless_log(log_emitter: Any, *, channel: str, message: str) -> None:
+async def _emit_headless_log(
+    log_emitter: Any,
+    *,
+    channel: str,
+    message: str,
+    call_id: str | None = None,
+    tool_name: str | None = None,
+    arguments: Mapping[str, Any] | None = None,
+) -> None:
     if log_emitter is None:
         return
     payload = {"channel": channel, "message": message}
+    if call_id:
+        payload["call_id"] = call_id
+    if tool_name:
+        payload["tool_name"] = tool_name
+    if arguments is not None:
+        payload["arguments"] = dict(arguments)
     result = log_emitter(payload)
     if inspect.isawaitable(result):
         await result
+
+
+def _build_tool_start_call_id(tool_name: str, arguments: Mapping[str, Any]) -> str:
+    """Build a deterministic call id so UI can anchor tool output streaming."""
+    normalized_tool = str(tool_name or "tool").strip() or "tool"
+    try:
+        args_blob = json.dumps(arguments, sort_keys=True, ensure_ascii=True, default=str)
+    except Exception:
+        args_blob = str(arguments)
+    digest = hashlib.md5(f"{normalized_tool}:{args_blob}".encode("utf-8")).hexdigest()[:12]
+    return f"call_{digest}"
 
 
 def _resolve_prompt_dispatch_agent() -> str:
@@ -566,6 +591,15 @@ async def execute_headless_action(
             policy_report=report.to_dict(),
             workspace_root=str(project_root),
         )
+
+    await _emit_headless_log(
+        log_emitter,
+        channel="on_tool_start",
+        message=f"Tool validated. Starting {tool_name}.",
+        call_id=_build_tool_start_call_id(tool_name, arguments),
+        tool_name=tool_name,
+        arguments=arguments,
+    )
 
     await _emit_headless_log(
         log_emitter,

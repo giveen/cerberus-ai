@@ -2566,6 +2566,58 @@ class OpenAIChatCompletionsModel(Model):
                             token_count, _ = count_tokens_with_tiktoken(output_text)
                             estimated_output_tokens = token_count
 
+                            # Legacy models may emit tool intent only in textual COMMITTING_JSON blocks.
+                            # As soon as the block closes, synthesize a function call and stop streaming so
+                            # the runner can execute the tool immediately.
+                            if not state.function_calls and "COMMITTING_JSON" in output_text:
+                                extracted_call = _extract_committing_json_tool_call(output_text)
+                                if extracted_call is not None:
+                                    recovered_tool_name, recovered_tool_arguments = extracted_call
+                                    recovered_args = _coerce_tool_arguments_for_api(
+                                        recovered_tool_arguments,
+                                        tool_name=recovered_tool_name,
+                                    )
+                                    synthetic_call_id = (
+                                        "call_"
+                                        + hashlib.md5(
+                                            (recovered_tool_name + str(time.time())).encode()
+                                        ).hexdigest()[:12]
+                                    )
+                                    state.function_calls[0] = ResponseFunctionToolCall(
+                                        id=FAKE_RESPONSES_ID,
+                                        arguments=recovered_args,
+                                        name=recovered_tool_name,
+                                        type="function_call",
+                                        call_id=synthetic_call_id,
+                                    )
+                                    streamed_tool_calls.append(
+                                        {
+                                            "role": "assistant",
+                                            "content": None,
+                                            "tool_calls": [
+                                                {
+                                                    "id": synthetic_call_id,
+                                                    "type": "function",
+                                                    "function": {
+                                                        "name": recovered_tool_name,
+                                                        "arguments": recovered_args,
+                                                    },
+                                                }
+                                            ],
+                                        }
+                                    )
+                                    self.suppress_final_output = True
+                                    stream_interrupted = True
+                                    _RUNTIME_DEBUG_LOGGER.write(
+                                        channel="trace_debug",
+                                        message="committing_json_stream_closure_detected",
+                                        payload={
+                                            "tool_name": recovered_tool_name,
+                                            "call_id": synthetic_call_id,
+                                        },
+                                    )
+                                    break
+
                             # Periodically check price limit during streaming
                             # This allows early termination if price limit is reached mid-stream
                             if (

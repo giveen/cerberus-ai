@@ -1395,10 +1395,39 @@ class AgentDashboardState(rx.State):
             channel = "partial_stdout"
         elif channel == "on_tool_call":
             channel = "status"
+        tool_name = str(event.get("tool_name", "") or "").strip()
         if channel == "partial_stdout":
             channel = "stdout"
-        message = str(event.get("message", "") or "").rstrip()
+        raw_message = str(event.get("message", "") or "")
+        if channel in {"stdout", "stderr"}:
+            message = raw_message.rstrip("\r\n")
+            if message == "":
+                # Preserve blank streaming lines so terminal output shape remains intact.
+                message = " "
+        else:
+            message = raw_message.rstrip()
         call_id = str(event.get("call_id", "") or "").strip()
+
+        if channel == "on_tool_start":
+            anchor = message or f"Starting {tool_name or 'tool'}..."
+            async with self:
+                if index >= len(self.agent_sessions):
+                    return
+
+                session = self._session_copy(index)
+                if tool_name:
+                    session.active_tool_name = tool_name
+                if message:
+                    session.status_line = message
+                self._store_session(index, session)
+                self._append_or_update_stream_log(
+                    index,
+                    "Tool",
+                    anchor,
+                    call_id=call_id or tool_name or session.active_tool_name,
+                )
+            return
+
         if not message:
             return
 

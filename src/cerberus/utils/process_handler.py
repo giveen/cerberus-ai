@@ -276,7 +276,7 @@ async def _run_streaming_container_exec(
         await _maybe_call_text_callback(state["callback"], text)
         if state["emit"]:
             stream_channel = "partial_stdout" if channel == "stdout" else channel
-            await emit_stream_event(stream_channel, text.rstrip("\r\n"), callback=event_callback)
+            await emit_stream_event(stream_channel, text, callback=event_callback)
 
     async def _consume_payload(channel: str, payload: str, *, flush: bool = False) -> None:
         state = channels[channel]
@@ -728,7 +728,7 @@ async def run_streaming_subprocess(
             await _maybe_call_text_callback(callback, text)
             if emit:
                 stream_channel = "partial_stdout" if channel == "stdout" else channel
-                await emit_stream_event(stream_channel, text.rstrip("\r\n"), callback=event_callback)
+                await emit_stream_event(stream_channel, text, callback=event_callback)
         return collected, truncated
 
     stdout_task = asyncio.create_task(
