@@ -49,6 +49,13 @@ _MAX_EXEC_TIMEOUT = max(_DEFAULT_EXEC_TIMEOUT, int(os.getenv("CERBERUS_COMMAND_T
 _DEFAULT_TRUNCATE_HEAD = 50
 _DEFAULT_TRUNCATE_TAIL = 50
 _AUDIT_DIR = "audit/local_exec"
+_CANARY_ATTESTATION_COMMAND = "whoami && hostname && cat /etc/os-release | grep PRETTY_NAME"
+_CANARY_EXPECTED_PRETTY_NAME = "Kali GNU/Linux"
+_CANARY_EXECUTION_ENVIRONMENT_ID = "Kali-Docker"
+
+
+class HardStopExecutionError(RuntimeError):
+    """Raised when command execution does not run inside the expected container."""
 
 
 class ToolResponse(BaseModel):
@@ -80,6 +87,7 @@ class CommandExecutionResult(BaseModel):
     truncated: bool = False
     summary: str = ""
     error: Optional[Dict[str, Any]] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -113,6 +121,8 @@ class CerberusBaseTool:
             raw = await self.execute(request)
             normalized = self._normalize_payload(raw)
             redacted = self._redact_payload(normalized)
+            payload_metadata = redacted.get("metadata")
+            runtime_metadata = payload_metadata if isinstance(payload_metadata, dict) else {}
             response = ToolResponse(
                 ok=True,
                 tool_name=self.tool_name,
@@ -125,7 +135,7 @@ class CerberusBaseTool:
                 truncated=bool(redacted.get("truncated", False)),
                 summary=str(redacted.get("summary", "")),
                 exit_code=redacted.get("exit_code"),
-                metadata=base_meta,
+                metadata={**base_meta, **runtime_metadata},
             )
             return response
         except Exception as exc:  # pylint: disable=broad-except
@@ -288,6 +298,7 @@ async def execute_system_command(
             stdout="",
             stderr="",
             error={"code": "empty_argv", "message": "No executable argument supplied."},
+            metadata={"execution_environment_id": "unknown"},
         )
 
     executable = str(argv[0])
@@ -304,6 +315,7 @@ async def execute_system_command(
             stdout="",
             stderr="",
             error={"code": "command_not_found", "message": f"Executable not found: {executable}"},
+            metadata={"execution_environment_id": "unknown"},
         )
 
     root = get_project_space().ensure_initialized().resolve()
@@ -316,6 +328,69 @@ async def execute_system_command(
 
     timeout_value = max(1, min(int(timeout_seconds), _MAX_EXEC_TIMEOUT))
     started = datetime.now(tz=UTC)
+    logger = get_cerberus_logger()
+
+    attestation_result = await run_streaming_subprocess(
+        argv=["sh", "-lc", _CANARY_ATTESTATION_COMMAND],
+        cwd=str(target_cwd),
+        env=runtime_env,
+        timeout_seconds=max(3, min(timeout_value, 15)),
+        redactor=None,
+        stdout_mode="line",
+        stderr_mode="line",
+        max_output_chars=4_000,
+        max_line_chars=1_000,
+        timeout_message="Canary attestation timed out by policy",
+    )
+    attestation_output = (
+        f"{attestation_result.stdout}\n{attestation_result.stderr}".strip()
+    )
+    with suppress(Exception):
+        logger.audit(
+            "DOCKER_ENV_ATTESTATION",
+            actor="tool_kernel",
+            data={
+                "command": _CANARY_ATTESTATION_COMMAND,
+                "output": attestation_output,
+                "exit_code": attestation_result.exit_code,
+            },
+            tags=["canary", "container", "attestation"],
+        )
+
+    if _CANARY_EXPECTED_PRETTY_NAME not in attestation_output:
+        raise HardStopExecutionError(
+            "HARD_STOP: command execution blocked because container attestation did not match "
+            f"'{_CANARY_EXPECTED_PRETTY_NAME}'. Observed='{attestation_output or 'unknown'}'"
+        )
+
+    masked_command = " ".join(mask_sensitive_cli_args(argv))
+    with suppress(Exception):
+        logger.audit(
+            f"DOCKER_EXEC_START: {masked_command}",
+            actor="tool_kernel",
+            data={
+                "cwd": str(target_cwd),
+                "execution_environment_id": _CANARY_EXECUTION_ENVIRONMENT_ID,
+            },
+            tags=["canary", "container", "execution"],
+        )
+
+    command_pid: Optional[int] = None
+
+    async def _started_callback(process: asyncio.subprocess.Process) -> None:
+        nonlocal command_pid
+        command_pid = process.pid
+        with suppress(Exception):
+            logger.audit(
+                "DOCKER_EXEC_PID",
+                actor="tool_kernel",
+                data={
+                    "pid": process.pid,
+                    "command": masked_command,
+                    "execution_environment_id": _CANARY_EXECUTION_ENVIRONMENT_ID,
+                },
+                tags=["canary", "container", "execution"],
+            )
 
     def _redact(text: str) -> str:
         masked = secure.redact_text(text, redactions)
@@ -331,10 +406,25 @@ async def execute_system_command(
         redactor=_redact,
         stdout_mode="line",
         stderr_mode="line",
+        started_callback=_started_callback,
         max_output_chars=200_000,
         max_line_chars=8_000,
         timeout_message="Execution timed out by policy",
     )
+
+    if command_pid is None and process_result.pid is not None:
+        command_pid = process_result.pid
+        with suppress(Exception):
+            logger.audit(
+                "DOCKER_EXEC_PID",
+                actor="tool_kernel",
+                data={
+                    "pid": command_pid,
+                    "command": masked_command,
+                    "execution_environment_id": _CANARY_EXECUTION_ENVIRONMENT_ID,
+                },
+                tags=["canary", "container", "execution"],
+            )
 
     ended = datetime.now(tz=UTC)
     stdout_text = process_result.stdout
@@ -360,6 +450,11 @@ async def execute_system_command(
             truncated=truncated,
             summary=summary,
             error=None,
+            metadata={
+                "execution_environment_id": _CANARY_EXECUTION_ENVIRONMENT_ID,
+                "attestation": attestation_output,
+                "pid": command_pid if command_pid is not None else process_result.pid,
+            },
         )
 
     return CommandExecutionResult(
@@ -375,6 +470,11 @@ async def execute_system_command(
         truncated=truncated,
         summary=summary,
         error={"code": mapped.code, "message": mapped.message},
+        metadata={
+            "execution_environment_id": _CANARY_EXECUTION_ENVIRONMENT_ID,
+            "attestation": attestation_output,
+            "pid": command_pid if command_pid is not None else process_result.pid,
+        },
     )
 
 

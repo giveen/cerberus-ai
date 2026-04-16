@@ -80,6 +80,7 @@ from cerberus.tools.sessions import (
     set_current_toolbox_session_id,
     set_run_context_toolbox_session_id,
 )
+from cerberus.sdk.planner.executor import select_tools_for_execution
 
 
 _ACTIVE_STREAMED_RESULTS: "weakref.WeakSet[RunResultStreaming]" = weakref.WeakSet()
@@ -856,9 +857,17 @@ class Runner:
             )
 
         # Phase 5: Send to LLM (precomputed tool set only)
-        filtered_tools = [
-            tool for tool in all_tools if cls._resolve_tool_name(tool) in allowed_tool_names
-        ]
+        selection = select_tools_for_execution(
+            available_tools=all_tools,
+            allowed_tool_names=allowed_tool_names,
+        )
+        filtered_tools = selection.selected_tools
+        if selection.missing_tool_names and debug_enabled:
+            cls._jit_trace(
+                "Execution Plan Missing Runtime Tools: "
+                + ", ".join(selection.missing_tool_names),
+                enabled=debug_enabled,
+            )
         if filtered_tools:
             finalized_tools = cls._finalize_turn_tools(filtered_tools)
 

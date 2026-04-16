@@ -10,6 +10,7 @@ from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
+from pydantic import ValidationError
 
 from openai.types.responses import (
     ResponseComputerToolCall,
@@ -33,6 +34,8 @@ from openai.types.responses.response_input_param import ComputerCallOutput
 from openai.types.responses.response_reasoning_item import ResponseReasoningItem
 
 from cerberus.parsers import parse_json_lenient, parse_response
+from cerberus.internal.debug_logger import get_debug_logger
+from cerberus.guardrails.policy_engine import PolicyDecision, evaluate_tool_execution
 
 from .agent import Agent, ToolsToFinalOutputResult
 from .agent_output import AgentOutputSchema
@@ -77,6 +80,9 @@ from .tracing import (
     trace,
 )
 from .util import _coro, _error_tracing
+
+
+_RUNTIME_DEBUG_LOGGER = get_debug_logger()
 
 if TYPE_CHECKING:
     from .run import RunConfig
@@ -277,6 +283,14 @@ class SingleStepResult:
         """Items generated during the agent run (i.e. everything generated after
         `original_input`)."""
         return self.pre_step_items + self.new_step_items
+
+
+@dataclass
+class ToolArgValidationOutcome:
+    validation_error: dict[str, Any] | None
+    parsed_arguments: dict[str, Any] | None
+    was_repaired: bool
+    repaired_arguments: dict[str, Any] | None
 
 
 def get_model_tracing_impl(
@@ -566,9 +580,11 @@ class RunImpl:
         required_fields = _required_fields_from_schema(params_json_schema)
         retry_hint = _build_schema_retry_hint(tool_name, params_json_schema)
         fields_text = ", ".join(required_fields) if required_fields else "(none declared)"
+        schema_template = retry_hint.get("suggested_arguments_json", "{}")
         message = (
             "Error: Malformed JSON arguments. Please ensure you output a valid JSON object. "
-            f"Tool: {tool_name}. Required fields: {fields_text}."
+            f"Tool: {tool_name}. Required fields: {fields_text}. "
+            f"Retry with JSON like: {schema_template}"
         )
 
         return {
@@ -591,51 +607,297 @@ class RunImpl:
         tool_name: str,
         raw_arguments: str,
         params_json_schema: dict[str, Any],
-    ) -> dict[str, Any] | None:
+        params_pydantic_model: Any | None,
+        risk_tier: int,
+    ) -> ToolArgValidationOutcome:
         required_fields = _required_fields_from_schema(params_json_schema)
         normalized_arguments = raw_arguments.strip() if isinstance(raw_arguments, str) else ""
-
-        if not required_fields:
-            return None
+        was_repaired = False
+        repaired_arguments: dict[str, Any] | None = None
 
         if not normalized_arguments:
-            return cls._build_runner_tool_validation_error(
-                tool_name=tool_name,
-                raw_arguments="",
-                params_json_schema=params_json_schema,
-                missing_fields=list(required_fields),
-                empty_args=True,
+            if not required_fields:
+                return ToolArgValidationOutcome(
+                    validation_error=None,
+                    parsed_arguments={},
+                    was_repaired=False,
+                    repaired_arguments=None,
+                )
+            return ToolArgValidationOutcome(
+                validation_error=cls._build_runner_tool_validation_error(
+                    tool_name=tool_name,
+                    raw_arguments="",
+                    params_json_schema=params_json_schema,
+                    missing_fields=list(required_fields),
+                    empty_args=True,
+                ),
+                parsed_arguments=None,
+                was_repaired=False,
+                repaired_arguments=None,
             )
 
         try:
-            parsed_arguments = parse_json_lenient(normalized_arguments, prefer_last=True)
-        except ValueError:
-            return cls._build_runner_tool_malformed_json_error(
-                tool_name=tool_name,
-                raw_arguments=normalized_arguments,
-                params_json_schema=params_json_schema,
+            parsed_arguments = json.loads(normalized_arguments)
+        except (TypeError, ValueError):
+            # Attempt lightweight repair before surfacing hard failure
+            _repaired_raw: Any = None
+            try:
+                import json_repair as _json_repair
+                _repaired_raw = _json_repair.loads(normalized_arguments)
+            except Exception:
+                _repaired_raw = None
+
+            if _repaired_raw is not None:
+                was_repaired = True
+                if isinstance(_repaired_raw, dict):
+                    repaired_arguments = _repaired_raw
+                logger.debug(
+                    "Repaired malformed tool arguments for %s via json_repair (run_impl)",
+                    tool_name,
+                )
+                parsed_arguments = _repaired_raw
+            else:
+                _RUNTIME_DEBUG_LOGGER.write(
+                    channel="trace_debug",
+                    message="runner_tool_argument_malformed_json",
+                    payload={
+                        "tool_name": tool_name,
+                        "arguments_preview": normalized_arguments[:800],
+                    },
+                )
+                return ToolArgValidationOutcome(
+                    validation_error=cls._build_runner_tool_malformed_json_error(
+                        tool_name=tool_name,
+                        raw_arguments=normalized_arguments,
+                        params_json_schema=params_json_schema,
+                    ),
+                    parsed_arguments=None,
+                    was_repaired=False,
+                    repaired_arguments=None,
+                )
+
+        if not isinstance(parsed_arguments, dict):
+            _RUNTIME_DEBUG_LOGGER.write(
+                channel="trace_debug",
+                message="runner_tool_argument_non_object_json",
+                payload={
+                    "tool_name": tool_name,
+                    "arguments_preview": normalized_arguments[:800],
+                    "parsed_type": type(parsed_arguments).__name__,
+                },
+            )
+            return ToolArgValidationOutcome(
+                validation_error=cls._build_runner_tool_malformed_json_error(
+                    tool_name=tool_name,
+                    raw_arguments=normalized_arguments,
+                    params_json_schema=params_json_schema,
+                ),
+                parsed_arguments=None,
+                was_repaired=was_repaired,
+                repaired_arguments=repaired_arguments,
             )
 
-        if not isinstance(parsed_arguments, dict) or not parsed_arguments:
-            return cls._build_runner_tool_validation_error(
-                tool_name=tool_name,
-                raw_arguments=normalized_arguments,
-                params_json_schema=params_json_schema,
-                missing_fields=list(required_fields),
-                empty_args=True,
+        if not parsed_arguments:
+            if normalized_arguments != "{}":
+                _RUNTIME_DEBUG_LOGGER.write(
+                    channel="trace_debug",
+                    message="runner_tool_argument_collapsed_empty_object",
+                    payload={
+                        "tool_name": tool_name,
+                        "arguments_preview": normalized_arguments[:800],
+                    },
+                )
+                return ToolArgValidationOutcome(
+                    validation_error=cls._build_runner_tool_malformed_json_error(
+                        tool_name=tool_name,
+                        raw_arguments=normalized_arguments,
+                        params_json_schema=params_json_schema,
+                    ),
+                    parsed_arguments=None,
+                    was_repaired=was_repaired,
+                    repaired_arguments=repaired_arguments,
+                )
+            if not required_fields:
+                return ToolArgValidationOutcome(
+                    validation_error=None,
+                    parsed_arguments={},
+                    was_repaired=was_repaired,
+                    repaired_arguments=repaired_arguments,
+                )
+            return ToolArgValidationOutcome(
+                validation_error=cls._build_runner_tool_validation_error(
+                    tool_name=tool_name,
+                    raw_arguments=normalized_arguments,
+                    params_json_schema=params_json_schema,
+                    missing_fields=list(required_fields),
+                    empty_args=True,
+                ),
+                parsed_arguments=None,
+                was_repaired=was_repaired,
+                repaired_arguments=repaired_arguments,
             )
 
         missing_fields = _missing_required_fields(parsed_arguments, params_json_schema)
         if missing_fields:
-            return cls._build_runner_tool_validation_error(
-                tool_name=tool_name,
-                raw_arguments=normalized_arguments,
-                params_json_schema=params_json_schema,
-                missing_fields=missing_fields,
-                empty_args=False,
+            return ToolArgValidationOutcome(
+                validation_error=cls._build_runner_tool_validation_error(
+                    tool_name=tool_name,
+                    raw_arguments=normalized_arguments,
+                    params_json_schema=params_json_schema,
+                    missing_fields=missing_fields,
+                    empty_args=False,
+                ),
+                parsed_arguments=None,
+                was_repaired=was_repaired,
+                repaired_arguments=repaired_arguments,
             )
 
+        if was_repaired:
+            strict_repair_error = cls._strict_validate_repaired_args(
+                tool_name=tool_name,
+                parsed_arguments=parsed_arguments,
+                params_json_schema=params_json_schema,
+                params_pydantic_model=params_pydantic_model,
+            )
+            if strict_repair_error is not None:
+                return ToolArgValidationOutcome(
+                    validation_error=strict_repair_error,
+                    parsed_arguments=None,
+                    was_repaired=True,
+                    repaired_arguments=repaired_arguments,
+                )
+
+        policy_result = evaluate_tool_execution(
+            tool_name=tool_name,
+            risk_tier=risk_tier,
+            was_repaired=was_repaired,
+            arguments=parsed_arguments,
+        )
+
+        if policy_result.decision == PolicyDecision.REQUIRES_HUMAN_APPROVAL:
+            pending = {
+                "ok": False,
+                "error": "tool_execution_pending_approval",
+                "tool": tool_name,
+                "status": "PENDING_APPROVAL",
+                "message": "Tool execution paused pending operator approval.",
+                "policy": policy_result.to_dict(),
+                "was_repaired": was_repaired,
+                "risk_tier": policy_result.risk_tier,
+                "raw_arguments": normalized_arguments,
+                "repaired_arguments": repaired_arguments,
+                "arguments": parsed_arguments,
+            }
+            _RUNTIME_DEBUG_LOGGER.write(
+                channel="trace_debug",
+                message="runner_tool_requires_human_approval",
+                payload={
+                    "tool_name": tool_name,
+                    "risk_tier": policy_result.risk_tier,
+                    "was_repaired": was_repaired,
+                    "raw_arguments_preview": normalized_arguments[:800],
+                    "repaired_arguments": repaired_arguments,
+                },
+            )
+            return ToolArgValidationOutcome(
+                validation_error=pending,
+                parsed_arguments=None,
+                was_repaired=was_repaired,
+                repaired_arguments=repaired_arguments,
+            )
+
+        return ToolArgValidationOutcome(
+            validation_error=None,
+            parsed_arguments=parsed_arguments,
+            was_repaired=was_repaired,
+            repaired_arguments=repaired_arguments,
+        )
+
+    @classmethod
+    def _strict_validate_repaired_args(
+        cls,
+        *,
+        tool_name: str,
+        parsed_arguments: dict[str, Any],
+        params_json_schema: dict[str, Any],
+        params_pydantic_model: Any | None,
+    ) -> dict[str, Any] | None:
+        properties = params_json_schema.get("properties", {})
+        if isinstance(properties, dict):
+            unexpected = [k for k in parsed_arguments.keys() if k not in properties]
+            if unexpected:
+                return {
+                    **cls._build_runner_tool_malformed_json_error(
+                        tool_name=tool_name,
+                        raw_arguments=json.dumps(parsed_arguments, ensure_ascii=True),
+                        params_json_schema=params_json_schema,
+                    ),
+                    "repair_strict_validation_failed": True,
+                    "repair_failure_reason": "unexpected_fields",
+                    "unexpected_fields": unexpected,
+                }
+
+        if params_pydantic_model is not None:
+            try:
+                if hasattr(params_pydantic_model, "model_validate"):
+                    validated = params_pydantic_model.model_validate(parsed_arguments, strict=True)
+                    normalized = (
+                        validated.model_dump()
+                        if hasattr(validated, "model_dump")
+                        else dict(parsed_arguments)
+                    )
+                else:
+                    validated = params_pydantic_model(**parsed_arguments)
+                    normalized = (
+                        validated.dict() if hasattr(validated, "dict") else dict(parsed_arguments)
+                    )
+            except ValidationError as exc:
+                return {
+                    **cls._build_runner_tool_malformed_json_error(
+                        tool_name=tool_name,
+                        raw_arguments=json.dumps(parsed_arguments, ensure_ascii=True),
+                        params_json_schema=params_json_schema,
+                    ),
+                    "repair_strict_validation_failed": True,
+                    "repair_failure_reason": "schema_validation_error",
+                    "schema_error": str(exc),
+                }
+            except Exception as exc:
+                return {
+                    **cls._build_runner_tool_malformed_json_error(
+                        tool_name=tool_name,
+                        raw_arguments=json.dumps(parsed_arguments, ensure_ascii=True),
+                        params_json_schema=params_json_schema,
+                    ),
+                    "repair_strict_validation_failed": True,
+                    "repair_failure_reason": "schema_validation_exception",
+                    "schema_error": str(exc),
+                }
+
+            for key, value in parsed_arguments.items():
+                if key in normalized and normalized[key] != value:
+                    return {
+                        **cls._build_runner_tool_malformed_json_error(
+                            tool_name=tool_name,
+                            raw_arguments=json.dumps(parsed_arguments, ensure_ascii=True),
+                            params_json_schema=params_json_schema,
+                        ),
+                        "repair_strict_validation_failed": True,
+                        "repair_failure_reason": "coerced_value",
+                        "coerced_field": key,
+                    }
+
         return None
+
+    @staticmethod
+    def _tool_output_raw_item(
+        tool_call: ResponseFunctionToolCall,
+        output: Any,
+    ) -> dict[str, Any]:
+        raw_item = ItemHelpers.tool_call_output_item(tool_call, truncate_output(output))
+        raw_item["name"] = tool_call.name
+        raw_item["arguments"] = tool_call.arguments
+        return raw_item
 
     @classmethod
     async def execute_tools_and_side_effects(
@@ -758,6 +1020,18 @@ class RunImpl:
                 pre_step_items=pre_step_items,
                 new_step_items=new_step_items,
                 next_step=NextStepRunAgain(),
+            )
+
+        pending_approval = cls._extract_pending_approval(function_results)
+        if pending_approval is not None:
+            context_wrapper.pending_approval = pending_approval
+            context_wrapper.last_tool_validation = pending_approval
+            return SingleStepResult(
+                original_input=original_input,
+                model_response=new_response,
+                pre_step_items=pre_step_items,
+                new_step_items=new_step_items,
+                next_step=NextStepFinalOutput(output=pending_approval),
             )
 
         # Surface unknown tool calls back to the model as tool outputs so the run can continue.
@@ -916,6 +1190,32 @@ class RunImpl:
             ):
                 return output
         return None
+
+    @staticmethod
+    def _extract_pending_approval(
+        tool_results: list[FunctionToolResult],
+    ) -> dict[str, Any] | None:
+        for tool_result in tool_results:
+            output = tool_result.output
+            if (
+                isinstance(output, dict)
+                and output.get("status") == "PENDING_APPROVAL"
+                and output.get("error") == "tool_execution_pending_approval"
+            ):
+                return output
+        return None
+
+    @staticmethod
+    def _with_execution_metadata(output: Any) -> Any:
+        if not isinstance(output, dict):
+            return output
+        metadata = output.get("metadata")
+        normalized_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        normalized_metadata.setdefault(
+            "execution_environment_id",
+            str(os.getenv("CERBERUS_EXECUTION_ENVIRONMENT_ID", "unknown") or "unknown"),
+        )
+        return {**output, "metadata": normalized_metadata}
 
     @classmethod
     def maybe_reset_tool_choice(
@@ -1170,6 +1470,82 @@ class RunImpl:
                 kwargs["status"] = status
             return ResponseFunctionToolCall(**kwargs)
 
+    @staticmethod
+    def _build_operator_rejection_payload(
+        *,
+        tool_name: str,
+        pending_payload: dict[str, Any],
+        decision_payload: dict[str, Any],
+        raw_arguments: str,
+    ) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "status": "REJECTED_BY_OPERATOR",
+            "error": "tool_execution_rejected_by_operator",
+            "tool": tool_name,
+            "message": "Operator rejected repaired tool arguments. Select a safer alternative.",
+            "risk_tier": int(pending_payload.get("risk_tier", 4) or 4),
+            "was_repaired": bool(pending_payload.get("was_repaired", False)),
+            "raw_arguments": pending_payload.get("raw_arguments", raw_arguments),
+            "repaired_arguments": pending_payload.get("repaired_arguments"),
+            "operator_decision": "REJECT",
+            "operator_reason": str(decision_payload.get("reason", "") or "").strip(),
+        }
+
+    @classmethod
+    def _apply_pending_approval_decision(
+        cls,
+        *,
+        context_wrapper: RunContextWrapper[TContext],
+        function_tool: FunctionTool,
+        tool_call: ResponseFunctionToolCall,
+    ) -> tuple[ResponseFunctionToolCall, dict[str, Any] | None]:
+        pending_payload = context_wrapper.pending_approval if isinstance(context_wrapper.pending_approval, dict) else {}
+        if not pending_payload:
+            return tool_call, None
+
+        pending_tool = str(pending_payload.get("tool", "") or "")
+        if pending_tool and pending_tool != function_tool.name:
+            return tool_call, None
+
+        decision_payload = context_wrapper.pending_approval_decision if isinstance(context_wrapper.pending_approval_decision, dict) else {}
+        if not decision_payload:
+            return tool_call, None
+
+        decision = str(decision_payload.get("decision", "") or "").strip().upper()
+        if decision not in {"APPROVE", "REJECT"}:
+            return tool_call, None
+
+        if decision == "REJECT":
+            rejection = cls._build_operator_rejection_payload(
+                tool_name=function_tool.name,
+                pending_payload=pending_payload,
+                decision_payload=decision_payload,
+                raw_arguments=tool_call.arguments,
+            )
+            context_wrapper.pending_approval = {}
+            context_wrapper.pending_approval_decision = {}
+            return tool_call, rejection
+
+        approved_arguments = decision_payload.get("repaired_arguments")
+        if not isinstance(approved_arguments, dict) or not approved_arguments:
+            approved_arguments = pending_payload.get("repaired_arguments")
+        if not isinstance(approved_arguments, dict) or not approved_arguments:
+            approved_arguments = pending_payload.get("arguments")
+        if not isinstance(approved_arguments, dict):
+            approved_arguments = {}
+
+        updated_tool_call = tool_call
+        if approved_arguments:
+            updated_tool_call = cls._copy_tool_call_with_arguments(
+                tool_call,
+                json.dumps(approved_arguments, ensure_ascii=True, sort_keys=True, separators=(",", ":")),
+            )
+
+        context_wrapper.pending_approval = {}
+        context_wrapper.pending_approval_decision = {}
+        return updated_tool_call, None
+
     @classmethod
     async def execute_function_tool_calls(
         cls,
@@ -1227,11 +1603,31 @@ class RunImpl:
 
         for index, tool_run in enumerate(tool_runs):
             function_tool = tool_run.function_tool
-            validation_error = cls._validate_tool_args(
-                tool_name=function_tool.name,
-                raw_arguments=tool_run.tool_call.arguments,
-                params_json_schema=function_tool.params_json_schema,
+            effective_tool_call, operator_rejection = cls._apply_pending_approval_decision(
+                context_wrapper=context_wrapper,
+                function_tool=function_tool,
+                tool_call=tool_run.tool_call,
             )
+            if operator_rejection is not None:
+                indexed_results[index] = FunctionToolResult(
+                    tool=function_tool,
+                    output=operator_rejection,
+                    run_item=ToolCallOutputItem(
+                        output=operator_rejection,
+                        raw_item=cls._tool_output_raw_item(tool_run.tool_call, operator_rejection),
+                        agent=agent,
+                    ),
+                )
+                continue
+
+            validation_outcome = cls._validate_tool_args(
+                tool_name=function_tool.name,
+                raw_arguments=effective_tool_call.arguments,
+                params_json_schema=function_tool.params_json_schema,
+                params_pydantic_model=function_tool.params_pydantic_model,
+                risk_tier=function_tool.risk_tier,
+            )
+            validation_error = validation_outcome.validation_error
             if validation_error is not None:
                 if validation_error.get("empty_arguments"):
                     if empty_arg_validation is None:
@@ -1261,15 +1657,19 @@ class RunImpl:
                         }
                 else:
                     context_wrapper.last_tool_validation = validation_error
+                    if validation_error.get("status") == "PENDING_APPROVAL":
+                        pending_payload = {
+                            **validation_error,
+                            "call_id": tool_run.tool_call.call_id,
+                        }
+                        context_wrapper.pending_approval = pending_payload
+                        validation_error = pending_payload
                 indexed_results[index] = FunctionToolResult(
                     tool=function_tool,
                     output=validation_error,
                     run_item=ToolCallOutputItem(
                         output=validation_error,
-                        raw_item=ItemHelpers.tool_call_output_item(
-                            tool_run.tool_call,
-                            truncate_output(validation_error),
-                        ),
+                        raw_item=cls._tool_output_raw_item(tool_run.tool_call, validation_error),
                         agent=agent,
                     ),
                 )
@@ -1278,8 +1678,8 @@ class RunImpl:
             scheduled_tasks.append(
                 (
                     index,
-                    tool_run,
-                    asyncio.create_task(run_single_tool(function_tool, tool_run.tool_call)),
+                    ToolRunFunction(tool_call=effective_tool_call, function_tool=function_tool),
+                    asyncio.create_task(run_single_tool(function_tool, effective_tool_call)),
                 )
             )
 
@@ -1303,30 +1703,27 @@ class RunImpl:
                 else:
                     result = "Tool execution interrupted"
 
+                normalized_result = cls._with_execution_metadata(result)
+
                 indexed_results[index] = FunctionToolResult(
                     tool=tool_run.function_tool,
-                    output=result,
+                    output=normalized_result,
                     run_item=ToolCallOutputItem(
-                        output=result,
-                        raw_item=ItemHelpers.tool_call_output_item(
-                            tool_run.tool_call,
-                            truncate_output(result),
-                        ),
+                        output=normalized_result,
+                        raw_item=cls._tool_output_raw_item(tool_run.tool_call, normalized_result),
                         agent=agent,
                     ),
                 )
             raise e
 
         for (index, tool_run, _task), result in zip(scheduled_tasks, gathered_results):
+            normalized_result = cls._with_execution_metadata(result)
             indexed_results[index] = FunctionToolResult(
                 tool=tool_run.function_tool,
-                output=result,
+                output=normalized_result,
                 run_item=ToolCallOutputItem(
-                    output=result,
-                    raw_item=ItemHelpers.tool_call_output_item(
-                        tool_run.tool_call,
-                        truncate_output(result),
-                    ),
+                    output=normalized_result,
+                    raw_item=cls._tool_output_raw_item(tool_run.tool_call, normalized_result),
                     agent=agent,
                 ),
             )

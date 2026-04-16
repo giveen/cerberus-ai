@@ -121,6 +121,13 @@ TOOL_CATALOG = {
         "dependencies": [],
         "description": "Run generic Linux commands for reconnaissance",
     },
+    "ping_kali": {
+        "module": "cerberus.tools.reconnaissance.ping_kali",
+        "name": "ping_kali",
+        "phase": PHASE_RECON,
+        "dependencies": ["uname"],
+        "description": "Run a Kali canary command to attest container execution environment",
+    },
     "execute_code": {
         "module": "cerberus.tools.reconnaissance.exec_code",
         "name": "execute_code",

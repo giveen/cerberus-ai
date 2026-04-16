@@ -18,6 +18,11 @@ from reflex.vars.base import Var
 from cerberus.main import execute_headless_action, terminate_action
 from cerberus.parsers import parse_json_lenient
 from cerberus.verification.policy_engine import PolicyEngine, PolicyReport
+from cerberus_dashboard.state import (
+    KALI_DOCKER_ENVIRONMENT_BADGE,
+    environment_badge_text,
+    extract_execution_environment_id,
+)
 
 
 MAX_SESSIONS = 4
@@ -128,11 +133,12 @@ def _timestamp() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
 
-def _log_entry(role: str, content: str) -> dict[str, str]:
+def _log_entry(role: str, content: str, *, environment_label: str = "") -> dict[str, str]:
     return {
         "role": role,
         "content": content,
         "timestamp": _timestamp(),
+        "environment_label": environment_label,
     }
 
 
@@ -178,6 +184,7 @@ class AgentSession(BaseModel):
     prompt_stream_lines: list[str] = Field(default_factory=list)
     prompt_response_log_index: int | None = None
     prompt_agent: str = "one_tool"
+    execution_environment_id: str = ""
 
 
 def _new_session(index: int) -> AgentSession:
@@ -877,12 +884,12 @@ class AgentDashboardState(rx.State):
         self.agent_sessions = sessions
         self._persist_dashboard_snapshot()
 
-    def _append_log(self, index: int, role: str, content: str) -> None:
+    def _append_log(self, index: int, role: str, content: str, *, environment_label: str = "") -> None:
         cleaned = content.rstrip()
         if not cleaned:
             return
         session = self._session_copy(index)
-        updated_logs = [*session.logs, _log_entry(role, cleaned)]
+        updated_logs = [*session.logs, _log_entry(role, cleaned, environment_label=environment_label)]
         overflow = max(0, len(updated_logs) - MAX_LOG_ENTRIES)
         session.logs = updated_logs[-MAX_LOG_ENTRIES:]
         if session.prompt_response_log_index is not None:
@@ -1446,6 +1453,10 @@ class AgentDashboardState(rx.State):
 
             arguments = execution_result.arguments or action.get("arguments", {})
             details = json.dumps(arguments, sort_keys=True, default=str) if arguments else "{}"
+            environment_id = extract_execution_environment_id(execution_result.output)
+            if environment_id:
+                current_session.execution_environment_id = environment_id
+                self._store_session(index, current_session)
             self._append_log(
                 index,
                 "Agent",
@@ -1461,7 +1472,15 @@ class AgentDashboardState(rx.State):
                 else:
                     self._append_log(index, "System", "Command stream closed.")
             else:
-                self._append_log(index, "Tool", self._format_execution_output(execution_result.output))
+                badge_text = environment_badge_text(execution_result.output)
+                if badge_text == "" and environment_id == "Kali-Docker":
+                    badge_text = KALI_DOCKER_ENVIRONMENT_BADGE
+                self._append_log(
+                    index,
+                    "Tool",
+                    self._format_execution_output(execution_result.output),
+                    environment_label=badge_text,
+                )
             self._apply_report_state(
                 index,
                 report,
@@ -2101,6 +2120,18 @@ def render_log_entry(entry: dict[str, str]) -> rx.Component:
                 rx.vstack(
                     rx.hstack(
                         rx.text(entry["role"], color=MUTED_TEXT, font_size="0.72rem", font_weight="700", letter_spacing="0.06em"),
+                        rx.cond(
+                            (entry.get("environment_label", "") != ""),
+                            rx.badge(
+                                entry.get("environment_label", ""),
+                                variant="soft",
+                                color_scheme="teal",
+                                font_size="0.58rem",
+                                border_radius="999px",
+                                padding="0.15rem 0.5rem",
+                            ),
+                            rx.box(display="none"),
+                        ),
                         rx.spacer(),
                         rx.text(entry["timestamp"], color="#5B7A70", font_size="0.68rem"),
                         width="100%",

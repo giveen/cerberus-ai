@@ -126,7 +126,12 @@ def _missing_required_fields(
         if value is None:
             missing.append(field)
         elif field_type == "string" and isinstance(value, str) and not value.strip():
-            missing.append(field)
+            # Only flag a blank string as missing when the field has no default
+            # (or whose default is non-empty). Fields with default="" are optional
+            # by intent — the model legitimately passes "" to accept the default.
+            has_default = isinstance(field_schema, dict) and "default" in field_schema
+            if not has_default:
+                missing.append(field)
 
     return missing
 
@@ -179,6 +184,18 @@ class FunctionTool:
     strict_json_schema: bool = True
     """Whether the JSON schema is in strict mode. We **strongly** recommend setting this to True,
     as it increases the likelihood of correct JSON input."""
+
+    params_pydantic_model: Any | None = None
+    """Pydantic model backing this tool's argument schema."""
+
+    risk_tier: int = 1
+    """Execution risk tier for policy-gated tool invocation.
+
+    Tier 1: Read-only/local context.
+    Tier 2: Low-risk utility.
+    Tier 3: Elevated impact.
+    Tier 4: High-risk network/system mutation.
+    """
 
 
 @dataclass
@@ -260,6 +277,7 @@ def function_tool(
     use_docstring_info: bool = True,
     failure_error_function: ToolErrorFunction | None = None,
     strict_mode: bool = True,
+    risk_tier: int = 1,
 ) -> FunctionTool:
     """Overload for usage as @function_tool (no parentheses)."""
     ...
@@ -274,6 +292,7 @@ def function_tool(
     use_docstring_info: bool = True,
     failure_error_function: ToolErrorFunction | None = None,
     strict_mode: bool = True,
+    risk_tier: int = 1,
 ) -> Callable[[ToolFunction[...]], FunctionTool]:
     """Overload for usage as @function_tool(...)."""
     ...
@@ -288,6 +307,7 @@ def function_tool(
     use_docstring_info: bool = True,
     failure_error_function: ToolErrorFunction | None = default_tool_error_function,
     strict_mode: bool = True,
+    risk_tier: int = 1,
 ) -> FunctionTool | Callable[[ToolFunction[...]], FunctionTool]:
     """
     Decorator to create a FunctionTool from a function. By default, we will:
@@ -316,6 +336,8 @@ def function_tool(
             If False, it allows non-strict JSON schemas. For example, if a parameter has a default
             value, it will be optional, additional properties are allowed, etc. See here for more:
             https://platform.openai.com/docs/guides/structured-outputs?api-mode=responses#supported-schemas
+        risk_tier: Security risk tier for policy gating. Tier 4 should be used for high-risk
+            network/system mutation tools (for example shell or exploit orchestration wrappers).
     """
 
     def _create_function_tool(the_func: ToolFunction[...]) -> FunctionTool:
@@ -447,6 +469,12 @@ def function_tool(
                 except Exception as e:
                     try:
                         json_data = _forgiving_json_loads(input)
+                        if not isinstance(json_data, dict):
+                            # Repaired to a non-object type — not a valid tool argument payload
+                            raise ModelBehaviorError(
+                                f"Invalid JSON input for tool {schema.name}: "
+                                f"parsed as {type(json_data).__name__}, expected object"
+                            )
                         if _debug.DONT_LOG_TOOL_DATA:
                             logger.debug(f"Forgiving-parse succeeded for tool {schema.name}")
                         else:
@@ -545,6 +573,8 @@ def function_tool(
             try:
                 return await _on_invoke_tool_impl(ctx, input)
             except Exception as e:
+                if "HARD_STOP" in str(e):
+                    raise ModelBehaviorError(str(e)) from e
                 if failure_error_function is None:
                     raise
 
@@ -567,8 +597,10 @@ def function_tool(
             name=schema.name,
             description=schema.description or "",
             params_json_schema=schema.params_json_schema,
+            params_pydantic_model=schema.params_pydantic_model,
             on_invoke_tool=_on_invoke_tool,
             strict_json_schema=strict_mode,
+            risk_tier=max(1, min(int(risk_tier), 4)),
         )
 
     # If func is actually a callable, we were used as @function_tool with no parentheses
