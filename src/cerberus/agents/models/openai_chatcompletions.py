@@ -693,16 +693,47 @@ def _extract_tool_name_from_error_message(error_text: str) -> str:
 def _extract_committing_json_tool_call(raw_text: str) -> tuple[str, Any] | None:
     if not raw_text:
         return None
+    payload_text: str | None = None
+
+    # First attempt: direct COMMITTING_JSON capture.
     match = re.search(r"COMMITTING_JSON:\s*(\{.*\})", raw_text, flags=re.DOTALL)
-    if not match:
+    if match:
+        payload_text = match.group(1)
+
+    # Fallback for JSON stutter/truncation noise: capture from the first
+    # COMMITTING_JSON opening brace through the final closing brace.
+    if not payload_text:
+        marker = re.search(r"COMMITTING_JSON:\s*\{", raw_text, flags=re.DOTALL)
+        if marker:
+            start = raw_text.find("{", marker.start())
+            end = raw_text.rfind("}")
+            if start >= 0 and end > start:
+                payload_text = raw_text[start : end + 1]
+
+    if not payload_text:
+        _RUNTIME_DEBUG_LOGGER.write(
+            channel="trace_debug",
+            message="committing_json_extraction_missing_payload",
+            payload={"preview": raw_text[:800]},
+        )
         return None
 
-    payload = _parse_tool_args(match.group(1), tool_name="committing_json_fallback")
+    payload = _parse_tool_args(payload_text, tool_name="committing_json_fallback")
     if not isinstance(payload, dict):
+        _RUNTIME_DEBUG_LOGGER.write(
+            channel="trace_debug",
+            message="committing_json_extraction_parse_failed",
+            payload={"payload_preview": payload_text[:800]},
+        )
         return None
 
     tool_name = str(payload.get("name") or "").strip()
     if not tool_name:
+        _RUNTIME_DEBUG_LOGGER.write(
+            channel="trace_debug",
+            message="committing_json_extraction_missing_name",
+            payload={"payload_preview": payload_text[:800]},
+        )
         return None
 
     return tool_name, payload.get("arguments")
@@ -2890,11 +2921,10 @@ class OpenAIChatCompletionsModel(Model):
                             else error_text[:300]
                         )
                         correction_message = (
-                            "ERROR: Your last tool call contained a JSON Syntax Error "
-                            "(missing bracket or quote). "
+                            "SYSTEM WARNING: Your previous tool call had a syntax error. "
+                            "Please retry with a valid COMMITTING_JSON block. "
                             f"Review your output: [{_raw_snippet}]. "
-                            "Please re-issue the command with valid JSON format using the "
-                            "COMMITTING_JSON: tag, e.g.: "
+                            "Use format: "
                             f'COMMITTING_JSON: {{"name": "{recovered_tool_name}", "arguments": {{...}}}}'
                         )
                         self.add_to_message_history(

@@ -27,7 +27,12 @@ from cerberus.tools._lazy import LazyToolProxy
 from cerberus.tools.misc.cli_utils import CLI_UTILS
 from cerberus.tools.validation import is_valid_target, sanitize_tool_output
 from cerberus.tools.workspace import get_project_space
-from cerberus.utils.process_handler import StreamingContext, capture_streaming_context, run_streaming_subprocess
+from cerberus.utils.process_handler import (
+    StreamingContext,
+    capture_streaming_context,
+    emit_stream_event,
+    run_streaming_subprocess,
+)
 
 
 _MAX_TIMEOUT_SECONDS = 1800
@@ -178,6 +183,12 @@ class CerebroNmapTool:
     ) -> Dict[str, Any]:
         started = datetime.now(tz=UTC)
         nmap_bin = shutil.which("nmap")
+        active_container = str(
+            os.getenv("CERBERUS_ACTIVE_CONTAINER") or os.getenv("CEREBRO_ACTIVE_CONTAINER") or ""
+        ).strip()
+        if not nmap_bin and active_container:
+            # Container exec path resolves binaries inside the active container.
+            nmap_bin = "nmap"
         if not nmap_bin:
             return self._error("missing_dependency", "nmap binary not found on system PATH")
 
@@ -226,6 +237,38 @@ class CerebroNmapTool:
 
             def _redact_stream(text: str) -> str:
                 return self._secure.redact_text(text, redactions)
+
+            if stream_context.callback is not None:
+                version_header = "Starting Nmap (version unavailable)"
+                try:
+                    version_probe = await run_streaming_subprocess(
+                        argv=[nmap_bin, "--version"],
+                        cwd=self._workspace,
+                        env=runtime_env,
+                        timeout_seconds=5,
+                        redactor=_redact_stream,
+                        session_id=stream_context.session_id,
+                        emit_stdout=False,
+                        emit_stderr=False,
+                    )
+                    first_line = str(version_probe.stdout or "").strip().splitlines()
+                    if first_line:
+                        version_header = first_line[0]
+                except Exception:
+                    pass
+
+                await emit_stream_event(
+                    "partial_stdout",
+                    version_header,
+                    callback=stream_context.callback,
+                )
+
+                target_preview = " ".join(target_tokens[:4]).strip()
+                await emit_stream_event(
+                    "partial_stdout",
+                    f"Starting Nmap scan: {target_preview}",
+                    callback=stream_context.callback,
+                )
 
             async def _on_stdout(text: str) -> None:
                 stdout_chunks.append(text)

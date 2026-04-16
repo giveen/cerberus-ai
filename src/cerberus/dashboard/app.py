@@ -1004,7 +1004,7 @@ class AgentDashboardState(rx.State):
             return "Audit"
         if normalized_channel == "status":
             return "System"
-        if normalized_channel == "stdout" and active_tool_name == PROMPT_DISPATCH_TOOL:
+        if normalized_channel in {"stdout", "partial_stdout"} and active_tool_name == PROMPT_DISPATCH_TOOL:
             return "Assistant"
         return "Tool"
 
@@ -1391,6 +1391,12 @@ class AgentDashboardState(rx.State):
 
     async def _handle_runtime_event(self, index: int, event: dict[str, Any]) -> None:
         channel = str(event.get("channel", "stdout") or "stdout").strip().lower()
+        if channel == "on_token":
+            channel = "partial_stdout"
+        elif channel == "on_tool_call":
+            channel = "status"
+        if channel == "partial_stdout":
+            channel = "stdout"
         message = str(event.get("message", "") or "").rstrip()
         call_id = str(event.get("call_id", "") or "").strip()
         if not message:

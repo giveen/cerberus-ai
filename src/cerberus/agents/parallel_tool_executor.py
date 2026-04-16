@@ -33,6 +33,7 @@ class PendingToolCall:
     tool_name: str
     tool_function: Callable
     arguments: Dict[str, Any]
+    raw_arguments: str = "{}"
     agent_name: str
     context_wrapper: RunContextWrapper
     submitted_at: float = field(default_factory=time.time)
@@ -140,11 +141,17 @@ class ParallelToolExecutor:
             tool_call_id = f"call_{uuid.uuid4().hex[:16]}"
         
         async with self._lock:
+            try:
+                raw_arguments = json.dumps(arguments, ensure_ascii=True, separators=(",", ":"), default=str)
+            except Exception:
+                raw_arguments = str(arguments)
+
             pending_call = PendingToolCall(
                 tool_call_id=tool_call_id,
                 tool_name=tool_name,
                 tool_function=tool_function,
                 arguments=arguments,
+                raw_arguments=raw_arguments,
                 agent_name=agent_name,
                 context_wrapper=context_wrapper
             )
@@ -196,13 +203,13 @@ class ParallelToolExecutor:
                 await self.mark_tool_call_timeout(tool_call_id, timeout_error)
                 raise timeout_error from exc
 
-    async def get_tool_call_metadata(self, tool_call_id: str) -> Optional[Tuple[str, Dict[str, Any]]]:
-        """Return tool name and original arguments for a pending tool call."""
+    async def get_tool_call_metadata(self, tool_call_id: str) -> Optional[Tuple[str, Dict[str, Any], str]]:
+        """Return tool name, parsed arguments, and raw serialized arguments for a pending tool call."""
         async with self._lock:
             call = self.pending_calls.get(tool_call_id)
             if call is None:
                 return None
-            return call.tool_name, dict(call.arguments)
+            return call.tool_name, dict(call.arguments), str(call.raw_arguments or "{}")
     
     async def get_agent_results(self, agent_name: str) -> List[Tuple[str, Any, Optional[Exception]]]:
         """
@@ -362,12 +369,17 @@ class ParallelToolMixin:
                     output = result
 
                 tool_name = metadata[0] if metadata else "parallel_tool"
-                tool_arguments = metadata[1] if metadata else {}
-                serialized_arguments = json.dumps(
-                    tool_arguments,
-                    ensure_ascii=True,
-                    separators=(",", ":"),
-                )
+                tool_arguments = metadata[1] if metadata else None
+                serialized_arguments = metadata[2] if metadata else ""
+                if not serialized_arguments:
+                    serialized_arguments = json.dumps(
+                        {
+                            "_metadata_missing": True,
+                            "_tool_call_id": tool_call_id,
+                        },
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                    )
                 
                 # Create a mock tool call for the result
                 from openai.types.responses import ResponseFunctionToolCall
@@ -383,6 +395,8 @@ class ParallelToolMixin:
                 # Preserve original call metadata for observability/auditing in replay traces.
                 raw_item["name"] = tool_name
                 raw_item["arguments"] = serialized_arguments
+                if tool_arguments is not None:
+                    raw_item["parsed_arguments"] = tool_arguments
                 
                 results.append(
                     ToolCallOutputItem(

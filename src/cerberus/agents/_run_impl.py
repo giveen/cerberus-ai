@@ -123,9 +123,10 @@ def _build_parse_error_self_correction_message(
     """
     snippet_preview = raw_snippet[:300] if raw_snippet else "(unavailable)"
     return (
-        "ERROR: Your last tool call contained a JSON Syntax Error (missing bracket or quote). "
+        "SYSTEM WARNING: Your previous tool call had a syntax error. "
+        "Please retry with a valid COMMITTING_JSON block. "
         f"Review your output: [{snippet_preview}]. "
-        "Please re-issue the command with valid JSON format using the COMMITTING_JSON: tag, e.g.: "
+        "Use format: "
         f'COMMITTING_JSON: {{"name": "{tool_name}", "arguments": {schema_template}}}'
     )
 
