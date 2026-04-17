@@ -1,8 +1,7 @@
-<todos title="Docker build, launch, commit, push" rule="Review steps frequently throughout the conversation and DO NOT stop between steps unless they explicitly require it.">
-- [x] inspect-repo-and-docker-setup: Check git status/branch and identify Docker compose/build commands 🔴
-- [x] build-and-launch-docker-stack: Build Docker images and start services, then verify running containers 🔴
-- [x] commit-all-local-changes: Stage all changes and create a commit with a clear message 🔴
-- [-] push-changes-to-origin: Push committed changes to remote branch 🔴
+<todos title="Commit push and rebuild docker" rule="Review steps frequently throughout the conversation and DO NOT stop between steps unless they explicitly require it.">
+- [x] inspect-git-state: Inspect git working tree, current branch, and remotes before committing 🔴
+- [-] commit-and-push-changes: Stage all current changes, create commit, and push to origin/main 🔴
+- [ ] rebuild-and-restart-docker: Rebuild Docker images and relaunch stack, then verify running services 🔴
 </todos>
 
 <!-- Auto-generated todo section -->
