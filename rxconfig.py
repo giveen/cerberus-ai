@@ -9,15 +9,19 @@ except Exception:  # pragma: no cover - optional plugin import across Reflex ver
     SitemapPlugin = None
 
 
-REDIS_URL = os.getenv("REDIS_URL", "").strip() or os.getenv("REFLEX_REDIS_URL", "").strip()
+REDIS_URL = (
+    os.getenv("REDIS_URL", "").strip()
+    or os.getenv("REFLEX_REDIS_URL", "").strip()
+    or "redis://localhost:6379"
+)
 
 
 config = rx.Config(
     app_name="cerberus_reflex",
     frontend_port=8000,
     backend_port=8001,
-    redis_url=REDIS_URL or None,
-    state_manager_mode=StateManagerMode.REDIS if REDIS_URL else StateManagerMode.DISK,
+    redis_url=REDIS_URL,
+    state_manager_mode=StateManagerMode.REDIS,
     show_built_with_reflex=False,
     disable_plugins=[SitemapPlugin] if SitemapPlugin is not None else [],
 )

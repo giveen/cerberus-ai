@@ -1398,7 +1398,7 @@ class OpenAIChatCompletionsModel(Model):
 
         # Start non-blocking preflight during model initialization when possible.
         _schedule_silent_llm_preflight(
-            target_url=str(os.getenv("CERBERUS_API_BASE", "http://localhost:8000/v1")),
+            target_url=str(get_effective_api_base(default="http://localhost:8000/v1")),
             model=str(self.model),
         )
         
@@ -4051,7 +4051,7 @@ class OpenAIChatCompletionsModel(Model):
         cerebro_api_base = get_effective_api_base()
         uses_local_or_custom_endpoint = (
             "cerebro" in model_str
-            or bool(os.getenv("CERBERUS_API_BASE"))
+            or bool(os.getenv("CERBERUS_API_BASE") or os.getenv("CEREBRO_API_BASE"))
             or _is_local_or_custom_api_base(str(kwargs.get("api_base") or ""))
         )
         if uses_local_or_custom_endpoint:
@@ -4064,7 +4064,7 @@ class OpenAIChatCompletionsModel(Model):
 
         kwargs = _normalize_litellm_routing_kwargs(kwargs)
 
-        preflight_target_url = str(kwargs.get("api_base") or os.getenv("CERBERUS_API_BASE", "http://localhost:8000/v1"))
+        preflight_target_url = str(kwargs.get("api_base") or get_effective_api_base(default="http://localhost:8000/v1"))
         _schedule_silent_llm_preflight(
             target_url=preflight_target_url,
             model=str(kwargs.get("model", "")),

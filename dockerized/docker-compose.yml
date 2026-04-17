@@ -11,6 +11,8 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       SEARXNG_BASE_URL: "http://searxng:8080"
+      CERBERUS_PRICE_LIMIT: "100"
+      CEREBRO_PRICE_LIMIT: "100"
     volumes:
       - ./volumes/workspaces:/workspace/workspaces
       - ./volumes/logs:/workspace/logs
@@ -47,10 +49,14 @@ services:
       - ./.env/runtime.env
     environment:
       SEARXNG_BASE_URL: "http://searxng:8080"
+      QDRANT_URL: "http://qdrant:6333"
+      CERBERUS_PRICE_LIMIT: "100"
+      CEREBRO_PRICE_LIMIT: "100"
     volumes:
       - ./config:/config:ro
       - ./volumes/workspaces:/workspace/workspaces
       - ./volumes/logs:/workspace/logs
+      - /var/run/docker.sock:/var/run/docker.sock
     cap_add:
       - NET_ADMIN
       - NET_RAW

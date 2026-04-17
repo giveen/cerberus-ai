@@ -5,6 +5,7 @@ import random
 import re
 import shlex
 import shutil
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,11 @@ from cerberus.dashboard.state import (
     KALI_DOCKER_ENVIRONMENT_BADGE,
     environment_badge_text,
     extract_execution_environment_id,
+)
+from cerberus.internal.redis_client import (
+    get_redis_manager,
+    push_history_line,
+    broadcast_state_change,
 )
 
 
@@ -50,6 +56,7 @@ TOOL_EVENT_LOG_PATH = REPO_ROOT / ".cerberus" / "session" / "dashboard_tool_even
 PROMPT_DISPATCH_TOOL = "run_supervised_prompt"
 PROMPT_RESPONSE_MARKER = "final output"
 PROMPT_RESPONSE_FALLBACK_MARKER = "response"
+HIGH_RISK_LEVELS = {"high", "critical", "severe"}
 PROMPT_META_MARKERS = (
     "technical safety constraints",
     "audit reasoning",
@@ -65,6 +72,20 @@ PROMPT_HIDDEN_RESPONSE_MARKERS = (
     "role: validate and critique proposed actions. do not execute.",
     "policy engine found issues in the current plan",
     "[system][reflect]",
+)
+ERROR_LOG_MARKERS = (
+    "error",
+    "failed",
+    "failure",
+    "exception",
+    "traceback",
+    "timed out",
+    "timeout",
+    "blocked",
+    "denied",
+    "terminated",
+    "violation",
+    "pending approval",
 )
 STATE_SNAPSHOT_VERSION = 1
 STATE_SNAPSHOT_STORAGE_KEY = "cerberus_dashboard_snapshot_v1"
@@ -201,10 +222,7 @@ def _new_session(index: int) -> AgentSession:
         role=role,
         workspace=workspace,
         workspace_id=workspace_id,
-        logs=[
-            _log_entry("System", f"{session_id} linked to live headless execution."),
-            _log_entry("System", f"Role assigned: {role}. Workspace tether locked to {workspace}."),
-        ],
+        logs=[],
     )
 
 
@@ -300,6 +318,15 @@ def _sanitize_prompt_response_text(text: str) -> str:
     return cleaned
 
 
+def _is_error_log_content(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    if not lowered:
+        return False
+    if "⚠" in lowered:
+        return True
+    return any(marker in lowered for marker in ERROR_LOG_MARKERS)
+
+
 def _extract_prompt_response_from_lines(
     raw_lines: list[str],
     *,
@@ -331,8 +358,9 @@ def _extract_prompt_response_from_lines(
             continue
 
         if _is_box_border_line(stripped):
-            if captured_lines:
-                break
+            # Ignore panel borders instead of breaking. Some responses include
+            # multiple framed blocks and markdown separators that would
+            # otherwise cause premature truncation.
             continue
 
         captured_lines.append(stripped)
@@ -639,6 +667,7 @@ class AgentDashboardState(rx.State):
 
     agent_sessions: list[AgentSession] = _build_sessions()
     active_session_id: str = "AGENT-1"
+    cerberus_client_token: str = rx.LocalStorage("", name="cerberus_client_token", sync=True)
     dashboard_snapshot: str = rx.LocalStorage("", name=STATE_SNAPSHOT_STORAGE_KEY, sync=True)
     snapshot_hydrated: bool = False
 
@@ -665,10 +694,26 @@ class AgentDashboardState(rx.State):
         env_project_id = str(os.getenv("CERBERUS_PROJECT_ID", "") or "").strip()
         env_target_ip = str(os.getenv("CERBERUS_TARGET_IP", "") or "").strip()
         env_session_uuid = str(os.getenv("CERBERUS_SESSION_UUID", "") or "").strip()
+        token = str(self.cerberus_client_token or "").strip()
+        project_fallback = f"dashboard-{token}" if token else (active_session.workspace_id if active_session else "unknown")
+        session_fallback = token or (active_session.session_id if active_session else "unknown")
 
-        self.project_id = env_project_id or (active_session.workspace_id if active_session else "unknown")
+        self.project_id = env_project_id or project_fallback
         self.target_ip = env_target_ip or "unknown"
-        self.session_uuid = env_session_uuid or (active_session.session_id if active_session else "unknown")
+        self.session_uuid = env_session_uuid or session_fallback
+
+    @rx.event
+    def initialize_client_session(self) -> Any:
+        if not str(self.cerberus_client_token or "").strip():
+            self.cerberus_client_token = str(uuid.uuid4())
+        self._refresh_session_metadata_from_runtime()
+        self._persist_dashboard_snapshot()
+        
+        # Start Redis hydration and live subscription in background
+        asyncio.create_task(self._hydrate_from_redis())
+        asyncio.create_task(self._subscribe_to_redis_live())
+        
+        return AgentDashboardState.ensure_snapshot_hydrated
 
     @rx.event
     def initialize_session_metadata(self) -> None:
@@ -731,6 +776,12 @@ class AgentDashboardState(rx.State):
 
     @rx.event(background=True)
     async def ensure_snapshot_hydrated(self) -> None:
+        async with self:
+            if not str(self.cerberus_client_token or "").strip():
+                self.cerberus_client_token = str(uuid.uuid4())
+                self._refresh_session_metadata_from_runtime()
+                self._persist_dashboard_snapshot()
+
         if self.snapshot_hydrated:
             return
 
@@ -834,7 +885,7 @@ class AgentDashboardState(rx.State):
 
         session = self.agent_sessions[index]
         if session.is_busy or session.approval_required:
-            self._append_log(index, "Audit", "Detach is locked while the agent is busy or awaiting approval.")
+            self._append_log(index, "System", "Detach is locked while the agent is busy or awaiting approval.")
             return
 
         self.agent_sessions = [item for item in self.agent_sessions if item.session_id != session_id]
@@ -896,6 +947,9 @@ class AgentDashboardState(rx.State):
     def _append_log(self, index: int, role: str, content: str, *, environment_label: str = "") -> None:
         cleaned = content.rstrip()
         if not cleaned:
+            return
+
+        if role in {"System", "Audit"} and not _is_error_log_content(cleaned):
             return
 
         if role == "Tool":
@@ -999,7 +1053,8 @@ class AgentDashboardState(rx.State):
 
     def _capture_prompt_dispatch_output(self, index: int, message: str) -> None:
         session = self._session_copy(index)
-        session.prompt_stream_lines = [*session.prompt_stream_lines, message][-PROMPT_STREAM_LINE_LIMIT:]
+        stream_line_limit = max(PROMPT_STREAM_LINE_LIMIT, 2000)
+        session.prompt_stream_lines = [*session.prompt_stream_lines, message][-stream_line_limit:]
         self._store_session(index, session)
 
         extracted = _extract_prompt_response_from_lines(session.prompt_stream_lines)
@@ -1108,14 +1163,29 @@ class AgentDashboardState(rx.State):
             },
         ][-POLICY_HISTORY_LIMIT:]
         self._store_session(index, session)
+    
+    @staticmethod
+    def _is_high_risk_report(report: PolicyReport) -> bool:
+        risk_level = str(getattr(report, "risk_level", "") or "").strip().lower()
+        if risk_level in HIGH_RISK_LEVELS:
+            return True
+        if bool(getattr(report, "manual_approval_required", False)):
+            return True
+        return bool(getattr(report, "blocked", False))
 
     @staticmethod
     def _workspace_dir() -> str:
         return str(_default_workspaces_root())
 
-    @staticmethod
-    def _project_id_for_session(session: AgentSession) -> str:
-        return session.workspace_id.strip() or "dashboard"
+    def _project_id_for_session(self, session: AgentSession) -> str:
+        token = re.sub(r"[^a-zA-Z0-9._-]", "-", str(self.cerberus_client_token or "").strip())
+        workspace_id = session.workspace_id.strip() or "dashboard"
+        return f"{token}-{workspace_id}" if token else workspace_id
+
+    def _orchestration_session_id_for_session(self, session: AgentSession) -> str:
+        token = re.sub(r"[^a-zA-Z0-9._-]", "-", str(self.cerberus_client_token or "").strip())
+        base_session_id = session.session_id.strip() or "AGENT"
+        return f"{token}:{base_session_id}" if token else base_session_id
 
     @staticmethod
     def _system_state_for_session(session: AgentSession) -> dict[str, Any]:
@@ -1402,6 +1472,22 @@ class AgentDashboardState(rx.State):
             session.active_tool_name = ""
         session.tier_status = self._derive_tier_status(report, manual_approval_granted=manual_approval_granted)
         self._store_session(index, session)
+        
+        # Broadcast state change to Redis pub/sub
+        client_token = str(self.cerberus_client_token or "").strip()
+        if client_token:
+            asyncio.create_task(
+                broadcast_state_change(
+                    client_token,
+                    "BUSY" if is_busy else "ACTIVE",
+                    index=index,
+                    metadata={
+                        "status": session.status,
+                        "status_line": status_line,
+                        "active_tool": session.active_tool_name,
+                    },
+                )
+            )
 
     def _prime_session(self, index: int, command: str, tool_name: str) -> None:
         session = self._session_copy(index)
@@ -1428,12 +1514,30 @@ class AgentDashboardState(rx.State):
         session.logs = [
             *session.logs,
             _log_entry("User", command),
-            _log_entry("Audit", "Policy engine verification started for live headless execution."),
         ][-MAX_LOG_ENTRIES:]
         self._store_session(index, session)
         self.active_session_id = session.session_id
+        
+        # Broadcast state change to Redis pub/sub
+        client_token = str(self.cerberus_client_token or "").strip()
+        if client_token:
+            asyncio.create_task(
+                broadcast_state_change(
+                    client_token,
+                    "BUSY",
+                    index=index,
+                    metadata={
+                        "status": "verifying",
+                        "status_line": "Running policy verification.",
+                        "active_tool": tool_name,
+                    },
+                )
+            )
 
     async def _handle_runtime_event(self, index: int, event: dict[str, Any]) -> None:
+        # Extract client token for Redis history/pub-sub (injected by _log_emitter)
+        client_token = str(event.get("cerberus_client_token", "") or "").strip()
+        
         channel = str(event.get("channel", "stdout") or "stdout").strip().lower()
         if channel == "on_token":
             channel = "partial_stdout"
@@ -1451,6 +1555,10 @@ class AgentDashboardState(rx.State):
         else:
             message = raw_message.rstrip()
         call_id = str(event.get("call_id", "") or "").strip()
+
+        # Push to Redis history and broadcast live (non-blocking)
+        if client_token and message:
+            asyncio.create_task(self._push_to_redis_history(client_token, channel, message))
 
         if channel == "on_tool_start":
             anchor = message or f"Starting {tool_name or 'tool'}..."
@@ -1497,6 +1605,247 @@ class AgentDashboardState(rx.State):
             else:
                 self._append_log(index, role, message)
 
+    async def _push_to_redis_history(
+        self,
+        client_token: str,
+        channel: str,
+        message: str,
+    ) -> None:
+        """Push streaming message to Redis history list and broadcast to live channel.
+        
+        This runs in the background (via asyncio.create_task) to avoid blocking
+        the main state update flow. Both history (RPUSH to list) and live broadcast
+        (PUBLISH to channel) ensure persistence and real-time delivery.
+        """
+        try:
+            manager = await get_redis_manager()
+            
+            # Format: channel:message (e.g., "stdout: nmap -sV 192.168.1.1")
+            formatted_message = f"{channel}: {message}" if channel not in {"on_tool_start"} else message
+            
+            # Push to Redis history list for persistence
+            await manager.push_history(client_token, formatted_message)
+            
+            # Broadcast to live channel for connected clients
+            await manager.publish_live(client_token, formatted_message)
+        except Exception as e:
+            # Log but don't crash - Redis is optional enhancement
+            import logging
+            logging.warning(f"Failed to push to Redis history for {client_token}: {e}")
+
+    async def _hydrate_from_redis(self) -> None:
+        """Restore terminal state from Redis history on page load.
+        
+        Queries cerberus:history:<token> and replays all prior messages to restore
+        the session to its pre-refresh state. Also restores terminal border state
+        (BUSY/ACTIVE) from the last state-change event.
+        """
+        client_token = str(self.cerberus_client_token or "").strip()
+        if not client_token:
+            return
+        
+        try:
+            manager = await get_redis_manager()
+            
+            # Retrieve all history entries (start=0, end=-1 gets everything)
+            history_entries = await manager.get_history(client_token)
+            
+            if not history_entries:
+                # No prior history - start fresh
+                return
+            
+            # Parse history entries and reconstruct session logs
+            state_change_events = []  # Track state changes for terminal border restoration
+            
+            for entry in history_entries:
+                # Entries are formatted as "channel: message"
+                # Parse them back to reconstruct logs
+                try:
+                    if entry.startswith("{") and entry.endswith("}"):
+                        # This is a JSON state-change event
+                        payload = json.loads(entry)
+                        if payload.get("type") == "state_change":
+                            state_change_events.append(payload)
+                            # Apply state change to dashboard state
+                            await self._apply_hydrated_state_change(payload)
+                    else:
+                        # Regular message entry: "channel: message"
+                        if ": " in entry:
+                            parts = entry.split(": ", 1)
+                            channel = parts[0].strip()
+                            message = parts[1] if len(parts) > 1 else ""
+                        else:
+                            channel = "stdout"
+                            message = entry
+                        
+                        # Reconstruct log entry
+                        role = self._role_for_runtime_event(channel, "")
+                        if message.strip():  # Skip empty messages
+                            async with self:
+                                # Append to appropriate session
+                                if self.agent_sessions:
+                                    session = self._session_copy(0)  # Hydrate to first session
+                                    session.logs = [
+                                        *session.logs,
+                                        _log_entry(role, message),
+                                    ][-MAX_LOG_ENTRIES:]
+                                    self._store_session(0, session)
+                except json.JSONDecodeError:
+                    # Not JSON - treat as regular message
+                    if ": " in entry:
+                        parts = entry.split(": ", 1)
+                        channel = parts[0].strip()
+                        message = parts[1] if len(parts) > 1 else ""
+                    else:
+                        channel = "stdout"
+                        message = entry
+                    
+                    role = self._role_for_runtime_event(channel, "")
+                    if message.strip():
+                        async with self:
+                            if self.agent_sessions:
+                                session = self._session_copy(0)
+                                session.logs = [
+                                    *session.logs,
+                                    _log_entry(role, message),
+                                ][-MAX_LOG_ENTRIES:]
+                                self._store_session(0, session)
+                except Exception as e:
+                    import logging
+                    logging.warning(f"Failed to parse history entry: {e}")
+            
+            # Restore terminal border state from last state-change event
+            if state_change_events:
+                last_state = state_change_events[-1]
+                async with self:
+                    self._restore_state_from_last_change(last_state)
+            
+            import logging
+            logging.info(f"✅ Hydrated {len(history_entries)} history entries for token {client_token[:8]}...")
+            
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to hydrate from Redis: {e}")
+
+    async def _apply_hydrated_state_change(self, payload: dict[str, Any]) -> None:
+        """Apply a state-change event from history to restore session state."""
+        try:
+            index = payload.get("index", 0)
+            state = payload.get("state", "ACTIVE")
+            
+            async with self:
+                if index >= len(self.agent_sessions):
+                    return
+                
+                session = self._session_copy(index)
+                session.is_busy = state == "BUSY"
+                session.status = "running" if state == "BUSY" else "ready"
+                if "status_line" in payload:
+                    session.status_line = payload.get("status_line", "")
+                if "active_tool" in payload:
+                    session.active_tool_name = payload.get("active_tool", "")
+                self._store_session(index, session)
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to apply hydrated state change: {e}")
+
+    def _restore_state_from_last_change(self, last_state: dict[str, Any]) -> None:
+        """Restore terminal border state (BUSY/ACTIVE) from last state-change event."""
+        try:
+            index = last_state.get("index", 0)
+            state = last_state.get("state", "ACTIVE")
+            
+            if index >= len(self.agent_sessions):
+                return
+            
+            session = self._session_copy(index)
+            session.is_busy = state == "BUSY"
+            session.status = "running" if state == "BUSY" else "ready"
+            
+            # Restore metadata if available
+            metadata = last_state.get("metadata", {})
+            if metadata:
+                if "status" in metadata:
+                    session.status = metadata["status"]
+                if "status_line" in metadata:
+                    session.status_line = metadata["status_line"]
+                if "active_tool" in metadata:
+                    session.active_tool_name = metadata["active_tool"]
+            
+            self._store_session(index, session)
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to restore state from last change: {e}")
+
+    async def _subscribe_to_redis_live(self) -> None:
+        """Subscribe to Redis Pub/Sub channel and stream live updates to UI.
+        
+        Continuously listens to cerberus:live:<token> channel and merges new messages
+        with existing session logs. Handles both regular messages and state-change events.
+        """
+        client_token = str(self.cerberus_client_token or "").strip()
+        if not client_token:
+            return
+        
+        try:
+            manager = await get_redis_manager()
+            
+            import logging
+            logging.info(f"🔵 Starting Redis Pub/Sub subscription for token {client_token[:8]}...")
+            
+            # Subscribe to live channel
+            async with manager.subscribe(client_token) as pubsub:
+                async for message in pubsub.listen():
+                    if message is None:
+                        continue
+                    
+                    if message.get("type") != "message":
+                        continue
+                    
+                    data = message.get("data", "")
+                    if not data:
+                        continue
+                    
+                    # Parse message: could be JSON (state change) or text (regular message)
+                    try:
+                        if isinstance(data, str) and data.strip().startswith("{"):
+                            payload = json.loads(data)
+                            if payload.get("type") == "state_change":
+                                # Handle state change
+                                await self._apply_hydrated_state_change(payload)
+                                continue
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                    
+                    # Regular message: parse channel and content
+                    message_str = str(data)
+                    if ": " in message_str:
+                        parts = message_str.split(": ", 1)
+                        channel = parts[0].strip()
+                        content = parts[1] if len(parts) > 1 else ""
+                    else:
+                        channel = "stdout"
+                        content = message_str
+                    
+                    # Add to session logs
+                    if content.strip():
+                        async with self:
+                            if self.agent_sessions:
+                                session = self._session_copy(0)  # Apply to first session
+                                role = self._role_for_runtime_event(channel, session.active_tool_name)
+                                session.logs = [
+                                    *session.logs,
+                                    _log_entry(role, content),
+                                ][-MAX_LOG_ENTRIES:]
+                                self._store_session(0, session)
+        
+        except asyncio.CancelledError:
+            import logging
+            logging.info(f"🔴 Redis subscription cancelled for token {client_token[:8]}...")
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to subscribe to Redis live channel: {e}")
+
     async def _dispatch_verified_action(
         self,
         index: int,
@@ -1507,13 +1856,15 @@ class AgentDashboardState(rx.State):
         manual_approval_granted: bool = False,
     ) -> None:
         async def _log_emitter(event: dict[str, Any]) -> None:
+            # Inject client token into event for Redis history/pub-sub tracking
+            event["cerberus_client_token"] = str(self.cerberus_client_token or "").strip()
             await self._handle_runtime_event(index, event)
 
         execution_result = await execute_headless_action(
             action,
             workspace_dir=self._workspace_dir(),
             project_id=self._project_id_for_session(session),
-            session_id=session.session_id,
+            session_id=self._orchestration_session_id_for_session(session),
             log_emitter=_log_emitter,
         )
 
@@ -1645,7 +1996,8 @@ class AgentDashboardState(rx.State):
 
         async with self:
             self._append_policy_history(index, action=action, report=report, system_state=system_state)
-            self._append_log(index, "Audit", self._format_policy_message(report))
+            if self._is_high_risk_report(report):
+                self._append_log(index, "Audit", self._format_policy_message(report))
             self._refresh_system_health()
 
             if report.manual_approval_required:
@@ -1753,7 +2105,7 @@ class AgentDashboardState(rx.State):
             self._store_session(index, session)
             self._refresh_system_health()
 
-        result = await terminate_action(session.session_id)
+        result = await terminate_action(self._orchestration_session_id_for_session(session))
 
         async with self:
             if index >= len(self.agent_sessions):
@@ -1848,6 +2200,22 @@ class AgentDashboardState(rx.State):
             ][-MAX_LOG_ENTRIES:]
             self._store_session(index, session)
             self._refresh_system_health()
+            
+            # Broadcast state change to Redis pub/sub
+            client_token = str(self.cerberus_client_token or "").strip()
+            if client_token:
+                asyncio.create_task(
+                    broadcast_state_change(
+                        client_token,
+                        "BUSY",
+                        index=index,
+                        metadata={
+                            "status": "verifying",
+                            "status_line": session.status_line,
+                            "active_tool": session.active_tool_name,
+                        },
+                    )
+                )
 
         approved_action = dict(pending_action)
         if str(pending_action.get("approval_source", "") or "").strip() == "runtime_tool_validation":
@@ -1874,7 +2242,8 @@ class AgentDashboardState(rx.State):
                 system_state=self._system_state_for_session(session),
             )
             self._set_pending_action(index, pending_action=None, approval_required=False)
-            self._append_log(index, "Audit", self._format_policy_message(report))
+            if self._is_high_risk_report(report):
+                self._append_log(index, "Audit", self._format_policy_message(report))
 
             if report.blocked:
                 self._apply_report_state(
@@ -2912,4 +3281,4 @@ if hasattr(app, "app_wraps"):
         ),
     )
 
-app.add_page(index, route="/", on_load=AgentDashboardState.ensure_snapshot_hydrated)
+app.add_page(index, route="/", on_load=AgentDashboardState.initialize_client_session)
