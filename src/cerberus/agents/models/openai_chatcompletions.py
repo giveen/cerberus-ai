@@ -619,8 +619,65 @@ def _coerce_tool_arguments_for_api(raw: Any, tool_name: str = "") -> str:
     object string. If model output is malformed, preserve a recoverable
     wrapper payload instead of silently falling back to {}.
     """
+    def _normalize_typed_empty_values(payload: dict[str, Any], name: str) -> dict[str, Any]:
+        if not payload or not name:
+            return payload
+
+        try:
+            from cerberus.tools.all_tools import get_tool_registry
+
+            tool = get_tool_registry().get_tool_by_name(name)
+            params_schema = getattr(tool, "params_json_schema", None)
+            if not isinstance(params_schema, dict):
+                return payload
+
+            properties = params_schema.get("properties")
+            if not isinstance(properties, dict):
+                return payload
+
+            normalized = dict(payload)
+            changed_fields: list[str] = []
+
+            for key, value in list(normalized.items()):
+                if value != "":
+                    continue
+
+                field_schema = properties.get(key)
+                if not isinstance(field_schema, dict):
+                    continue
+
+                field_type = field_schema.get("type")
+                if field_type not in {"boolean", "integer", "number"}:
+                    continue
+
+                if "default" in field_schema:
+                    normalized[key] = field_schema.get("default")
+                elif field_type == "boolean":
+                    normalized[key] = False
+                elif field_type == "integer":
+                    normalized[key] = 0
+                else:
+                    normalized[key] = 0.0
+
+                changed_fields.append(str(key))
+
+            if changed_fields:
+                _RUNTIME_DEBUG_LOGGER.write(
+                    channel="trace_debug",
+                    message="tool_arguments_empty_string_repaired",
+                    payload={
+                        "tool_name": name,
+                        "fields": changed_fields,
+                    },
+                )
+
+            return normalized
+        except Exception:
+            return payload
+
     if isinstance(raw, dict):
-        return json.dumps(raw, ensure_ascii=True, separators=(",", ":"))
+        normalized = _normalize_typed_empty_values(raw, tool_name)
+        return json.dumps(normalized, ensure_ascii=True, separators=(",", ":"))
 
     candidate = ""
     if isinstance(raw, str):
@@ -630,7 +687,8 @@ def _coerce_tool_arguments_for_api(raw: Any, tool_name: str = "") -> str:
 
     parsed = _parse_tool_args(candidate, tool_name=tool_name) if candidate else None
     if isinstance(parsed, dict):
-        return json.dumps(parsed, ensure_ascii=True, separators=(",", ":"))
+        normalized = _normalize_typed_empty_values(parsed, tool_name)
+        return json.dumps(normalized, ensure_ascii=True, separators=(",", ":"))
 
     # Preserve plain streamed fragments (e.g. "arg1arg2") as-is. Wrapping
     # these breaks incremental tool-call assembly semantics.
