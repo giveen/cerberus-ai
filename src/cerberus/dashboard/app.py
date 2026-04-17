@@ -46,6 +46,7 @@ SESSION_ROLES = [
     "Containment Monitor",
 ]
 REPO_ROOT = Path(__file__).resolve().parents[1]
+TOOL_EVENT_LOG_PATH = REPO_ROOT / ".cerberus" / "session" / "dashboard_tool_events.jsonl"
 PROMPT_DISPATCH_TOOL = "run_supervised_prompt"
 PROMPT_RESPONSE_MARKER = "final output"
 PROMPT_RESPONSE_FALLBACK_MARKER = "response"
@@ -68,6 +69,7 @@ PROMPT_HIDDEN_RESPONSE_MARKERS = (
 STATE_SNAPSHOT_VERSION = 1
 STATE_SNAPSHOT_STORAGE_KEY = "cerberus_dashboard_snapshot_v1"
 ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 BOX_DRAWING_CHARS = set("+-=|│║─━═┌┐└┘├┤┬┴┼╭╮╰╯╔╗╚╝╠╣╦╩╬")
 PANEL_EDGE_CHARS = {"|", "│", "║"}
 KNOWN_COMMAND_TOKENS = {
@@ -280,6 +282,11 @@ def _looks_like_model_request_payload(text: str) -> bool:
 
 def _sanitize_prompt_response_text(text: str) -> str:
     cleaned = _join_prompt_response_lines(text.splitlines())
+    if not cleaned:
+        return ""
+
+    cleaned = THINK_TAG_RE.sub("", cleaned)
+    cleaned = cleaned.replace("<think>", "").replace("</think>", "").strip()
     if not cleaned:
         return ""
 
@@ -890,6 +897,10 @@ class AgentDashboardState(rx.State):
         cleaned = content.rstrip()
         if not cleaned:
             return
+
+        if role == "Tool":
+            self._write_tool_event_log(index, cleaned, environment_label=environment_label)
+
         session = self._session_copy(index)
         updated_logs = [*session.logs, _log_entry(role, cleaned, environment_label=environment_label)]
         overflow = max(0, len(updated_logs) - MAX_LOG_ENTRIES)
@@ -916,6 +927,9 @@ class AgentDashboardState(rx.State):
         cleaned = token.rstrip("\r\n")
         if not cleaned:
             return
+
+        if role == "Tool":
+            self._write_tool_event_log(index, cleaned, call_id=call_id)
 
         session = self._session_copy(index)
         current_call_id = call_id or session.stream_call_id or session.active_tool_name
@@ -946,6 +960,36 @@ class AgentDashboardState(rx.State):
 
         session.stream_call_id = current_call_id
         self._store_session(index, session)
+
+    def _write_tool_event_log(
+        self,
+        index: int,
+        content: str,
+        *,
+        call_id: str = "",
+        environment_label: str = "",
+    ) -> None:
+        if index >= len(self.agent_sessions):
+            return
+
+        session = self.agent_sessions[index]
+        payload = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "session_id": session.session_id,
+            "workspace": session.workspace,
+            "tool_name": session.active_tool_name,
+            "call_id": call_id,
+            "content": content,
+            "environment_label": environment_label,
+        }
+
+        try:
+            TOOL_EVENT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with TOOL_EVENT_LOG_PATH.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
+        except OSError:
+            # Logging failures must never interrupt dashboard execution.
+            return
 
     def _reset_stream_log(self, index: int) -> None:
         session = self._session_copy(index)
@@ -2167,6 +2211,9 @@ def audit_tier_tile(tier_code: str, tier_label: str, status: Any) -> rx.Componen
 
 def render_log_entry(entry: dict[str, str]) -> rx.Component:
     return rx.cond(
+        entry["role"] == "Tool",
+        rx.box(display="none"),
+        rx.cond(
         entry["role"] == "Assistant",
         rx.box(
             rx.vstack(
@@ -2250,6 +2297,7 @@ def render_log_entry(entry: dict[str, str]) -> rx.Component:
                 background="linear-gradient(180deg, rgba(9, 14, 12, 0.92) 0%, rgba(4, 8, 7, 0.9) 100%)",
                 border="1px solid rgba(96, 130, 119, 0.28)",
             ),
+        ),
         ),
     )
 
