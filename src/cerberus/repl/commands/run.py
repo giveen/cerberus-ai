@@ -9,6 +9,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import signal
 import threading
 from typing import Any, Dict, List, Literal, Optional
@@ -20,8 +21,10 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from cerberus.agents import get_agent_by_name
+from cerberus.agents.exceptions import AgentLoopError
 from cerberus.memory import MemoryManager
 from cerberus.memory.logic import clean, clean_data
+from cerberus.parsers import strip_think_block
 from cerberus.repl.commands.base import CommandError, FrameworkCommand, register_command
 from cerberus.repl.commands.config import CONFIG_STORE, _is_secret, _mask
 from cerberus.repl.commands.cost import CostCommand, USAGE_TRACKER
@@ -56,6 +59,7 @@ def _disable_external_trace_export_env() -> None:
 
 _DEFAULT_SAFE_MAX_TURNS = 8
 _MAX_OUTPUT_PREVIEW = 400
+_THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 
 class RunOptions(BaseModel):
@@ -230,6 +234,10 @@ class ExecutionSupervisor:
             failure_reason = str(exc)
             if hard_stop_requested:
                 failure_status = "hard-stopped"
+            elif isinstance(exc, AgentLoopError):
+                # Loop breaker should preserve partial output and avoid bubbling
+                # a hard run failure to callers like the dashboard dispatcher.
+                failure_status = "soft-stopped"
             else:
                 failure_status = "failed"
             self._finalize_turns(turns, interrupted=True)
@@ -443,6 +451,7 @@ class ExecutionSupervisor:
 
                 if event.name == "message_output_created" and isinstance(event.item, MessageOutputItem):
                     message_text = self._normalize_text(ItemHelpers.text_message_output(event.item))
+                    message_text = self._strip_think_text(message_text)
                     if message_text:
                         turn.assistant_messages.append(message_text)
                         console.print(message_text, highlight=False, end="")
@@ -612,6 +621,19 @@ class ExecutionSupervisor:
 
     def _normalize_text(self, value: str) -> str:
         return clean(value).strip()
+
+    def _strip_think_text(self, value: str) -> str:
+        if not value:
+            return ""
+
+        cleaned = strip_think_block(value)
+        if cleaned:
+            return cleaned.strip()
+
+        # Fallback for malformed or partial tag streams.
+        fallback = _THINK_TAG_RE.sub("", value)
+        fallback = fallback.replace("<think>", "").replace("</think>", "")
+        return fallback.strip()
 
     def _truncate(self, value: str, *, limit: int) -> str:
         if len(value) <= limit:

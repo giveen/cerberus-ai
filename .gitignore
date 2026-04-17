@@ -69,3 +69,9 @@ dockerized/volumes/*
 tmp_test_run/
 workspaces/*
 !workspaces/.gitkeep
+
+# Playwright
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/

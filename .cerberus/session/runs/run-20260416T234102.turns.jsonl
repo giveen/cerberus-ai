@@ -1,0 +1,1 @@
+{"turn_number": 1, "agent_name": "CTF agent", "user_input": "scan port 1024 on target 192.168.04 with nmap", "reasoning": [], "tool_calls": [], "assistant_messages": [], "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "interrupted": true, "started_at": "2026-04-16T23:41:03.258541+00:00", "completed_at": "2026-04-16T23:41:16.533044+00:00"}
