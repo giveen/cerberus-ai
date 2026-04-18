@@ -125,6 +125,18 @@ def test_dashboard_snapshot_round_trip_preserves_user_and_assistant_messages() -
         net_mbps=6.2,
         alert_count=0,
         sensor_health="Nominal",
+        project_id="test-project",
+        target_ip="192.168.1.1",
+        session_uuid="test-session-uuid",
+        verbose_logs=False,
+        parallel_execution=True,
+        show_tool_logs=True,
+        show_audit_logs=True,
+        response_only=False,
+        tier_1_enabled=True,
+        tier_2_enabled=True,
+        tier_3_enabled=True,
+        tier_4_enabled=False,
     )
     restored = _deserialize_dashboard_snapshot(snapshot)
 

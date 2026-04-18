@@ -727,9 +727,9 @@ class LocalFallbackAdapter(VectorDBAdapter):
         self._faiss_maps: Dict[str, List[int]] = {}
 
         # Persistence / background IO
-        self._persist_dir = str(Path(os.getenv("CERBERUS_LOCAL_PERSIST_DIR", "~/.cerberus/memory/local/")).expanduser())
+        self._persist_dir = Path(os.getenv("CERBERUS_LOCAL_PERSIST_DIR", "~/.cerberus/memory/local/")).expanduser()
         try:
-            os.makedirs(self._persist_dir, exist_ok=True)
+            self._persist_dir.mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
 

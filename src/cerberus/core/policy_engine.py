@@ -73,22 +73,22 @@ def evaluate_tool_execution(
             reason="low_risk_tier_auto_approved",
         )
 
-    if tier >= int(settings.elevated_logged_min_tier) and not was_repaired:
-        return PolicyResult(
-            decision=PolicyDecision.LOG_AND_APPROVE,
-            risk_tier=tier,
-            was_repaired=was_repaired,
-            tool_name=tool_name,
-            reason="high_risk_but_strict_json",
-        )
-
-    if tier == int(settings.manual_approval_tier) and was_repaired:
+    if tier >= int(settings.manual_approval_tier):
         return PolicyResult(
             decision=PolicyDecision.REQUIRES_HUMAN_APPROVAL,
             risk_tier=tier,
             was_repaired=was_repaired,
             tool_name=tool_name,
-            reason="tier4_repaired_payload_requires_hitl",
+            reason="tier4_requires_hitl",
+        )
+
+    if tier >= int(settings.elevated_logged_min_tier):
+        return PolicyResult(
+            decision=PolicyDecision.LOG_AND_APPROVE,
+            risk_tier=tier,
+            was_repaired=was_repaired,
+            tool_name=tool_name,
+            reason="tier3_logged_execution",
         )
 
     return PolicyResult(
@@ -96,7 +96,7 @@ def evaluate_tool_execution(
         risk_tier=tier,
         was_repaired=was_repaired,
         tool_name=tool_name,
-        reason="repaired_payload_elevated_tier_logged",
+        reason="default_logged_execution",
     )
 
 

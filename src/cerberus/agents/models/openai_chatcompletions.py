@@ -1444,6 +1444,146 @@ def prune_history(
     return pruned, removed_count, total_tokens
 
 
+class SlidingWindowTokenManager:
+    """Manages context window by pruning messages when approaching token limits.
+    
+    Strategy:
+    1. Count total tokens in messages
+    2. If > 80% of model's limit, prune intelligently:
+       - Keep system prompt (always pinned)
+       - Keep last 3 turns of conversation
+       - Truncate/summarize STDOUT blocks from tool results
+    3. Add System message notifying agent about pruning
+    """
+    
+    @staticmethod
+    def _truncate_stdout_block(content: str, max_chars: int = 500) -> str:
+        """Truncate a STDOUT block, keeping start and end with ellipsis."""
+        if len(content) <= max_chars:
+            return content
+        
+        # Keep first 1/3 and last 2/3 of max_chars
+        keep_start = max_chars // 3
+        keep_end = max_chars - keep_start
+        
+        start = content[:keep_start]
+        end = content[-keep_end:]
+        return f"{start}\n... [truncated {len(content) - max_chars} chars] ...\n{end}"
+    
+    @staticmethod
+    def _distill_tool_output(message: dict[str, Any]) -> dict[str, Any]:
+        """Distill a tool output message by truncating STDOUT content."""
+        if not isinstance(message, dict):
+            return message
+        
+        msg = dict(message)
+        role = msg.get("role", "")
+        
+        # Only distill Tool/Assistant role messages with large content
+        if role not in ("tool", "assistant"):
+            return msg
+        
+        content = msg.get("content")
+        if not isinstance(content, str):
+            return msg
+        
+        # Check if content contains STDOUT/output patterns and is large
+        if len(content) > 1000:
+            # Truncate large STDOUT blocks
+            if "STDOUT:" in content or "Output:" in content:
+                msg["content"] = SlidingWindowTokenManager._truncate_stdout_block(content)
+        
+        return msg
+    
+    @staticmethod
+    def apply_sliding_window(
+        messages: list[dict[str, Any]],
+        model_name: str,
+        model_max_tokens: int = 8000,
+        token_threshold_percent: float = 0.80,
+        keep_recent_turns: int = 3,
+    ) -> tuple[list[dict[str, Any]], bool, str]:
+        """Apply sliding window logic to messages.
+        
+        Returns:
+            (pruned_messages, was_pruned, pruning_notification)
+        """
+        if not messages:
+            return messages, False, ""
+        
+        # Calculate current token count
+        total_tokens, _ = count_tokens_with_tiktoken(messages)
+        threshold_tokens = int(model_max_tokens * token_threshold_percent)
+        
+        # If below threshold, no pruning needed
+        if total_tokens <= threshold_tokens:
+            return messages, False, ""
+        
+        # Pruning needed: apply intelligent strategy
+        pruned_messages = []
+        was_pruned = False
+        
+        # Step 1: Always keep system message (index 0)
+        if messages and messages[0].get("role") == "system":
+            pruned_messages.append(messages[0])
+            current_tokens, _ = count_tokens_with_tiktoken([messages[0]])
+        else:
+            current_tokens = 0
+        
+        # Step 2: Collect recent turns (conversation pairs)
+        # Work backwards from the end to keep the most recent turns
+        recent_messages = []
+        if len(messages) > 1:
+            # Group messages into turns (user->assistant pairs)
+            recent_messages = messages[-1 * (keep_recent_turns * 2):]
+            
+            # Apply distillation to middle messages to reduce size
+            middle_messages = messages[1:-1 * (keep_recent_turns * 2)] if len(messages) > keep_recent_turns * 2 else []
+            
+            distilled_middle = [SlidingWindowTokenManager._distill_tool_output(msg) for msg in middle_messages]
+            
+            # Calculate tokens needed
+            recent_tokens, _ = count_tokens_with_tiktoken(recent_messages)
+            middle_tokens, _ = count_tokens_with_tiktoken(distilled_middle)
+            
+            remaining_budget = threshold_tokens - current_tokens - recent_tokens
+            
+            # Add as many distilled middle messages as we can fit
+            if remaining_budget > 0:
+                included_middle = []
+                msg_tokens_map = {i: _count_single_message_tokens(
+                    msg, 
+                    encoding=_pruning_encoding_for_model(model_name)
+                ) for i, msg in enumerate(distilled_middle)}
+                
+                for i, msg in enumerate(distilled_middle):
+                    msg_tokens = msg_tokens_map[i]
+                    if msg_tokens <= remaining_budget:
+                        included_middle.append(msg)
+                        remaining_budget -= msg_tokens
+                    else:
+                        was_pruned = True
+                
+                pruned_messages.extend(included_middle)
+            else:
+                was_pruned = True
+        
+        # Always add recent messages to preserve conversation context
+        pruned_messages.extend(recent_messages)
+        
+        # Step 3: Create pruning notification
+        pruning_notification = ""
+        if was_pruned:
+            pruning_notification = (
+                f"[System Notice] Context window management: Your earlier messages have been "
+                f"summarized/truncated to maintain performance (>{token_threshold_percent*100:.0f}% of "
+                f"{model_max_tokens} tokens). The conversation continues with recent turns preserved. "
+                f"You may have limited visibility into older tool outputs."
+            )
+        
+        return pruned_messages, was_pruned, pruning_notification
+
+
 class ContextCompactedError(Exception):
     """Raised inside get_response/stream_response when a CERBERUS_SUPPORT_INTERVAL-based
     auto-compact fires mid-runner.  The outer CLI loop catches this, sets
@@ -3174,7 +3314,7 @@ class OpenAIChatCompletionsModel(Model):
                             else error_text[:300]
                         )
                         correction_message = (
-                            "SYSTEM WARNING: Your previous tool call had a syntax error. "
+                            "Your previous tool call arguments were malformed JSON. Review your exact syntax and try again. "
                             "Please retry with a valid COMMITTING_JSON block. "
                             f"Review your output: [{_raw_snippet}]. "
                             "Use format: "
@@ -4208,6 +4348,31 @@ class OpenAIChatCompletionsModel(Model):
                 kwargs["model"] = f"openai/{model_value}"
 
         kwargs = _normalize_litellm_routing_kwargs(kwargs)
+
+        # Apply sliding window token management (80% threshold)
+        if "messages" in kwargs and isinstance(kwargs["messages"], list):
+            try:
+                model_max = self._get_model_max_tokens(str(self.model))
+                pruned_msgs, was_pruned, notification = SlidingWindowTokenManager.apply_sliding_window(
+                    messages=kwargs["messages"],
+                    model_name=str(self.model),
+                    model_max_tokens=model_max,
+                    token_threshold_percent=0.80,
+                    keep_recent_turns=3,
+                )
+                
+                if was_pruned:
+                    kwargs["messages"] = pruned_msgs
+                    # Add system notification about pruning
+                    if notification:
+                        kwargs["messages"].append({
+                            "role": "system",
+                            "content": notification,
+                        })
+                    _RUNTIME_DEBUG_LOGGER.debug(f"Context window pruned: {len(kwargs.get('messages', []))} messages remain")
+            except Exception as e:
+                # Log but don't fail - token management is best-effort
+                _RUNTIME_DEBUG_LOGGER.debug(f"Token window management failed (non-critical): {e}")
 
         preflight_target_url = str(kwargs.get("api_base") or get_effective_api_base(default="http://localhost:8000/v1"))
         _schedule_silent_llm_preflight(

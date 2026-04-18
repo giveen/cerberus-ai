@@ -646,7 +646,7 @@ class CerebroNmapTool:
 NMAP_TOOL = LazyToolProxy(CerebroNmapTool)
 
 
-@function_tool(risk_tier=4)
+@function_tool(risk_tier=3)
 def nmap(
     target: str,
     args: str = "",

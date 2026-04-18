@@ -22,18 +22,14 @@ Use the supported repository-root workflow:
 ```bash
 make docker-build
 make docker-up
-make docker-up-runtime
-make docker-ps
 make docker-down
 ```
 
 What each command does:
 
 1. `make docker-build` builds the Docker images
-2. `make docker-up` starts the default dashboard stack
-3. `make docker-up-runtime` starts the full runtime plus MCP sidecars
-4. `make docker-ps` shows the full Cerberus stack, including profile-backed services
-5. `make docker-down` shuts everything down cleanly
+2. `make docker-up` starts the full Cerberus stack, including runtime and MCP sidecars
+3. `make docker-down` shuts everything down cleanly
 
 Direct Compose equivalents are still available if you need them.
 
@@ -44,13 +40,7 @@ cd dockerized
 docker compose build
 ```
 
-Start the default dashboard stack:
-
-```bash
-docker compose up -d
-```
-
-If you want the full runtime profile as well:
+Start the full stack (dashboard + runtime + MCP):
 
 ```bash
 docker compose --profile runtime --profile mcp up -d
@@ -84,7 +74,7 @@ Then:
 5. Click **STOP** on any session to terminate its subprocess tree
 
 > [!NOTE]
-> Default ports: dashboard (8000), API (8001), Redis (6379). The first dashboard load can take a minute after `docker compose up -d`, especially after a fresh build or when runtime sidecars are also starting.
+> Default ports: dashboard (8000), API (8001), Redis (6379). The first dashboard load can take a minute after `make docker-up`, especially after a fresh build or when runtime sidecars are also starting.
 
 > [!IMPORTANT]
 > Plain `docker compose down` from `dockerized/` only tears down services visible in the currently active Compose profile set. If you previously started `runtime` or `mcp` services, use the profile-aware shutdown command above so `cerberus`, `qdrant`, `container-mcp`, and `hexstrike-server` are removed as well.

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 import cerberus.agents.parallel_tool_executor as pte
@@ -122,5 +124,35 @@ async def test_parallel_result_without_metadata_does_not_fabricate_empty_argumen
     assert item.raw_item["name"] == "parallel_tool"
     assert "arguments" not in item.raw_item
     assert item.output == "received={'target': 'example.com'}"
+
+    await _reset_parallel_executor()
+
+
+@pytest.mark.asyncio
+async def test_parallel_batch_timeout_reaps_pending_calls(monkeypatch) -> None:
+    await _reset_parallel_executor()
+
+    async def slow_tool(_ctx: RunContextWrapper, arguments: dict) -> dict:
+        await asyncio.sleep(0.05)
+        return {"ok": True, "received": arguments}
+
+    monkeypatch.setattr(pte, "PARALLEL_BATCH_TIMEOUT_S", 0.01)
+
+    agent = _DummyParallelAgent()
+    context = RunContextWrapper(context=None)
+
+    call_id = await agent.submit_parallel_tool(
+        tool_name="nmap",
+        tool_function=slow_tool,
+        arguments={"target": "10.0.0.8"},
+        context_wrapper=context,
+    )
+
+    collected = await agent.collect_parallel_results()
+    executor = pte.get_parallel_tool_executor()
+
+    assert collected == []
+    assert call_id not in agent._pending_parallel_calls
+    assert call_id not in executor.pending_calls
 
     await _reset_parallel_executor()

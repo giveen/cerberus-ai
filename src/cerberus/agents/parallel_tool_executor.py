@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 PARALLEL_TOOL_TIMEOUT_S = 60.0
+PARALLEL_BATCH_TIMEOUT_S = 75.0
 
 
 @dataclass
@@ -97,6 +98,36 @@ class ParallelToolExecutor:
         """Register a newly created task after pruning completed entries."""
         self._sweep_active_tasks(force=True)
         self.active_tasks.append(task)
+        task.add_done_callback(self._unregister_active_task)
+
+    def _unregister_active_task(self, task: asyncio.Task) -> None:
+        """Remove a task from the active registry as soon as it completes."""
+        try:
+            self.active_tasks.remove(task)
+        except ValueError:
+            pass
+
+    async def _timeout_expired_calls(self, *, timeout_seconds: float) -> None:
+        """Mark stale pending calls as timed out using a wall-clock batch timeout."""
+        now = time.monotonic()
+        timed_out_ids: list[str] = []
+
+        async with self._lock:
+            for tool_call_id, call in list(self.pending_calls.items()):
+                if call.completed:
+                    continue
+                if (now - call.submitted_at) < timeout_seconds:
+                    continue
+                timed_out_ids.append(tool_call_id)
+
+        for tool_call_id in timed_out_ids:
+            for task in list(self.active_tasks):
+                if getattr(task, "_tool_call_id", None) == tool_call_id and not task.done():
+                    task.cancel()
+            timeout_error = asyncio.TimeoutError(
+                f"Tool call {tool_call_id} exceeded parallel batch timeout of {timeout_seconds} seconds"
+            )
+            await self.mark_tool_call_timeout(tool_call_id, timeout_error)
         
     async def start(self):
         """Start the background executor task."""
@@ -297,6 +328,8 @@ class ParallelToolExecutor:
                             if hasattr(task, '_tool_call_id') and task._tool_call_id == call.tool_call_id
                         )
                     ]
+
+                await self._timeout_expired_calls(timeout_seconds=PARALLEL_BATCH_TIMEOUT_S)
                 
                 # Execute pending calls
                 for call in pending:
@@ -307,9 +340,16 @@ class ParallelToolExecutor:
                             break
                     
                     # Create execution task
-                    task = asyncio.create_task(self._execute_tool_call(call))
-                    task._tool_call_id = call.tool_call_id  # type: ignore
-                    self._register_active_task(task)
+                    try:
+                        task = asyncio.create_task(self._execute_tool_call(call))
+                        task._tool_call_id = call.tool_call_id  # type: ignore
+                        self._register_active_task(task)
+                    except Exception as exc:
+                        await self.mark_tool_call_timeout(
+                            call.tool_call_id,
+                            RuntimeError(f"tool_start_failed: {exc}"),
+                        )
+                        logger.error("Failed to start tool %s (%s): %s", call.tool_name, call.tool_call_id, exc)
                 
                 # Brief sleep to avoid busy waiting
                 await asyncio.sleep(0.01)
@@ -491,8 +531,26 @@ class ParallelToolMixin:
         if not pending_ids:
             return []
 
-        collected = await asyncio.gather(
-            *(self._collect_single_parallel_result(tool_call_id) for tool_call_id in pending_ids),
-            return_exceptions=False,
-        )
+        collectors = [
+            asyncio.create_task(self._collect_single_parallel_result(tool_call_id))
+            for tool_call_id in pending_ids
+        ]
+        try:
+            collected = await asyncio.wait_for(
+                asyncio.gather(*collectors, return_exceptions=False),
+                timeout=PARALLEL_BATCH_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            for tool_call_id in pending_ids:
+                await self._parallel_executor.mark_tool_call_timeout(
+                    tool_call_id,
+                    asyncio.TimeoutError(
+                        f"Parallel batch timed out after {PARALLEL_BATCH_TIMEOUT_S} seconds"
+                    ),
+                )
+            for task in collectors:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*collectors, return_exceptions=True)
+            return []
         return [item for item in collected if item is not None]

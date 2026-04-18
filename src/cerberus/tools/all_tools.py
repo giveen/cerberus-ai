@@ -205,6 +205,27 @@ TOOL_CATALOG = {
         "dependencies": [],
         "description": "Fill form inputs using CSS selectors in the active browser page",
     },
+    "browser_screenshot": {
+        "module": "cerberus.tools.reconnaissance.browser",
+        "name": "browser_screenshot",
+        "phase": PHASE_RECON,
+        "dependencies": [],
+        "description": "Capture a full-page screenshot from the active Playwright browser session",
+    },
+    "extract_elements": {
+        "module": "cerberus.tools.reconnaissance.browser",
+        "name": "extract_elements",
+        "phase": PHASE_RECON,
+        "dependencies": [],
+        "description": "Extract visible DOM text and optional attributes from CSS selector matches",
+    },
+    "describe_page_structure": {
+        "module": "cerberus.tools.reconnaissance.browser",
+        "name": "describe_page_structure",
+        "phase": PHASE_RECON,
+        "dependencies": [],
+        "description": "Summarize page title, headings, forms, and links from the active browser page",
+    },
     "smb_list_shares": {
         "module": "cerberus.tools.reconnaissance.smbclient_tool",
         "name": "smb_list_shares",

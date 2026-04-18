@@ -26,6 +26,7 @@ from cerberus.agents import (
     Usage,
 )
 from cerberus.agents._run_impl import RunImpl
+from cerberus.agents._run_impl import _build_parse_error_self_correction_message
 
 from tests.core.test_responses import (
     get_final_output_message,
@@ -53,6 +54,18 @@ def test_empty_response():
     )
     assert not result.handoffs
     assert not result.functions
+
+
+def test_parse_error_self_correction_message_uses_malformed_json_wording() -> None:
+    message = _build_parse_error_self_correction_message(
+        tool_name="nmap",
+        raw_snippet='{"target":"10.0.0.1",bad_json',
+        schema_template='{"target":"<ip>"}',
+    )
+
+    assert "Your previous tool call arguments were malformed JSON." in message
+    assert "Review your exact syntax and try again." in message
+    assert "COMMITTING_JSON" in message
 
 
 def test_no_tool_calls():

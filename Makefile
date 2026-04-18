@@ -8,11 +8,11 @@ docker-build:
 
 .PHONY: docker-up
 docker-up:
-	cd dockerized && docker compose up -d
+	cd dockerized && docker compose --profile runtime --profile mcp up -d
 
 .PHONY: docker-up-runtime
 docker-up-runtime:
-	cd dockerized && docker compose --profile runtime --profile mcp up -d
+	$(MAKE) docker-up
 
 .PHONY: docker-down
 docker-down:

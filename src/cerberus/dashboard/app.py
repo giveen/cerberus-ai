@@ -24,11 +24,13 @@ from cerberus.dashboard.state import (
     environment_badge_text,
     extract_execution_environment_id,
 )
+from cerberus.infrastructure import env_manager
 from cerberus.internal.redis_client import (
     get_redis_manager,
     push_history_line,
     broadcast_state_change,
 )
+from reflex_dashboard.commands import COMMAND_MENU_ITEMS, COMMAND_REGISTRY
 
 
 MAX_SESSIONS = 4
@@ -73,6 +75,46 @@ PROMPT_HIDDEN_RESPONSE_MARKERS = (
     "policy engine found issues in the current plan",
     "[system][reflect]",
 )
+PROMPT_RESPONSE_NOISE_MARKERS = (
+    "committing_json",
+    "action system tool loaded:",
+    "cerebro supervised mission summary",
+    "turn journal |",
+    "summary | /workspace",
+    "field | value",
+    "agent |",
+    "status |",
+    "tokens |",
+    "tools |",
+    "memory |",
+    "level 25 a audit",
+    "agent_factory lifecycle event",
+    "this implies i should",
+    "but to be safe and consistent",
+    "actually, looking at the tools available",
+    "let's assume the user is just saying hi",
+)
+PROMPT_INLINE_TRUNCATION_MARKERS = (
+    "cerebro supervised mission summary",
+    "turn journal |",
+    "summary | /workspace",
+    "field | value",
+    "status |",
+    "tokens |",
+    "| field | value |",
+    "| agent |",
+)
+PROMPT_RESPONSE_TAIL_MARKERS = (
+    "cerebro supervised mission summary",
+    "turn journal",
+    "summary | /workspace",
+    "field | value",
+    "agent |",
+    "status |",
+    "tokens |",
+    "tools |",
+    "memory |",
+)
 ERROR_LOG_MARKERS = (
     "error",
     "failed",
@@ -93,6 +135,38 @@ ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 BOX_DRAWING_CHARS = set("+-=|│║─━═┌┐└┘├┤┬┴┼╭╮╰╯╔╗╚╝╠╣╦╩╬")
 PANEL_EDGE_CHARS = {"|", "│", "║"}
+CONFIG_CARD_ORDER = (
+    "CERBERUS_API_BASE",
+    "CEREBRO_MODEL",
+    "CERBERUS_ACTIVE_CONTAINER",
+    "REDIS_URL",
+    "DEBUG_MODE",
+)
+CONFIG_CARD_DESCRIPTIONS = {
+    "CERBERUS_API_BASE": "The URL for your local LLM endpoint or OpenAI-compatible gateway.",
+    "CEREBRO_MODEL": "The default model identifier the dashboard will route prompts to.",
+    "CERBERUS_ACTIVE_CONTAINER": "The active Kali or runtime container used for supervised command execution.",
+    "REDIS_URL": "Connection string used for Reflex session persistence and shared dashboard state.",
+    "DEBUG_MODE": "Enable additional runtime debugging for container-side services that honor this flag.",
+}
+CONFIG_CARD_PLACEHOLDERS = {
+    "CERBERUS_API_BASE": "http://192.168.0.x:11434/v1",
+    "CEREBRO_MODEL": "qwen2.5-coder:32b",
+    "CERBERUS_ACTIVE_CONTAINER": "cerberus",
+    "REDIS_URL": "redis://redis:6379",
+}
+
+
+def _display_env_target(key: str) -> str:
+    target_path = env_manager.resolve_env_path_for_key(key)
+    try:
+        return str(target_path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(target_path)
+
+
+CONFIG_CARD_TARGETS = {key: _display_env_target(key) for key in CONFIG_CARD_ORDER}
+APPROVAL_REJECTION_MESSAGE = "The operator has denied execution of this tool. Suggest an alternative, lower-risk approach."
 KNOWN_COMMAND_TOKENS = {
     "bash",
     "cat",
@@ -298,6 +372,36 @@ def _looks_like_model_request_payload(text: str) -> bool:
     return isinstance(parsed.get("messages"), list) and isinstance(parsed.get("model"), str)
 
 
+def _extract_explicit_response_section(text: str) -> str:
+    lines = str(text or "").splitlines()
+    if not lines:
+        return ""
+
+    for line in lines:
+        inline_match = re.match(r"^\s*response\s*:\s*(.+)$", line, flags=re.IGNORECASE)
+        if inline_match:
+            return _join_prompt_response_lines([inline_match.group(1).strip()])
+
+    response_index: int | None = None
+    for index, line in enumerate(lines):
+        heading = line.strip().lower().rstrip(":")
+        if heading == "response":
+            response_index = index
+            break
+
+    if response_index is None:
+        return str(text or "")
+
+    section_lines: list[str] = []
+    for line in lines[response_index + 1 :]:
+        heading = line.strip().lower().rstrip(":")
+        if heading in {"reasoning", "analysis", "thinking"}:
+            break
+        section_lines.append(line)
+
+    return _join_prompt_response_lines(section_lines)
+
+
 def _sanitize_prompt_response_text(text: str) -> str:
     cleaned = _join_prompt_response_lines(text.splitlines())
     if not cleaned:
@@ -305,6 +409,52 @@ def _sanitize_prompt_response_text(text: str) -> str:
 
     cleaned = THINK_TAG_RE.sub("", cleaned)
     cleaned = cleaned.replace("<think>", "").replace("</think>", "").strip()
+    if not cleaned:
+        return ""
+
+    # Check if this is a COMMITTING_JSON response - preserve it as-is
+    if "COMMITTING_JSON:" in cleaned:
+        return cleaned
+
+    cleaned = _extract_explicit_response_section(cleaned)
+    if not cleaned:
+        return ""
+
+    filtered_lines: list[str] = []
+    for raw_line in cleaned.splitlines():
+        line = raw_line.strip()
+        lowered = line.lower()
+
+        for marker in PROMPT_INLINE_TRUNCATION_MARKERS:
+            marker_index = lowered.find(marker)
+            if marker_index != -1:
+                line = line[:marker_index].rstrip(" |-:")
+                lowered = line.lower()
+
+        if not line:
+            if filtered_lines and filtered_lines[-1] != "":
+                filtered_lines.append("")
+            continue
+
+        # Preserve COMMITTING_JSON payloads even if they contain noise markers
+        if line.startswith("COMMITTING_JSON:"):
+            filtered_lines.append(line)
+            continue
+
+        if any(marker in lowered for marker in PROMPT_RESPONSE_NOISE_MARKERS):
+            continue
+
+        if re.match(r"^level\s+\d+\s+.*action system tool loaded:", lowered):
+            continue
+        if re.match(r"^\[[0-9]{2}/[0-9]{2}/[0-9]{2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2}\]\s+level\s+\d+", lowered):
+            continue
+
+        if line in filtered_lines and len(line) >= 48:
+            continue
+
+        filtered_lines.append(line)
+
+    cleaned = _join_prompt_response_lines(filtered_lines)
     if not cleaned:
         return ""
 
@@ -316,6 +466,81 @@ def _sanitize_prompt_response_text(text: str) -> str:
     if _looks_like_model_request_payload(cleaned):
         return ""
     return cleaned
+
+
+def _visible_session_logs(
+    logs: list[dict[str, str]],
+    *,
+    response_only: bool,
+    show_audit_logs: bool,
+) -> list[dict[str, str]]:
+    if response_only:
+        latest_user: dict[str, str] | None = None
+        latest_assistant: dict[str, str] | None = None
+
+        for entry in logs:
+            role = str(entry.get("role", "") or "")
+            if role == "Audit" and not show_audit_logs:
+                continue
+
+            if role == "User":
+                latest_user = entry
+                continue
+
+            if role != "Assistant":
+                continue
+
+            raw_content = str(entry.get("content", "") or "")
+            cleaned_content = _sanitize_prompt_response_text(raw_content)
+            if cleaned_content:
+                latest_assistant = {**entry, "content": cleaned_content}
+                continue
+
+            # Fallback: keep minimally cleaned assistant output instead of blanking the pane.
+            fallback = THINK_TAG_RE.sub("", raw_content)
+            fallback = fallback.replace("<think>", "").replace("</think>", "").strip()
+            fallback = _extract_explicit_response_section(fallback)
+            fallback = _join_prompt_response_lines(fallback.splitlines())
+            if fallback:
+                latest_assistant = {**entry, "content": fallback}
+
+        result: list[dict[str, str]] = []
+        if latest_user is not None:
+            result.append(latest_user)
+        if latest_assistant is not None:
+            result.append(latest_assistant)
+        return result
+
+    visible_logs: list[dict[str, str]] = []
+
+    for entry in logs:
+        role = str(entry.get("role", "") or "")
+        if role == "Audit" and not show_audit_logs:
+            continue
+
+        if role == "Assistant":
+            cleaned_content = _sanitize_prompt_response_text(str(entry.get("content", "") or ""))
+            if cleaned_content:
+                visible_logs.append({**entry, "content": cleaned_content})
+                continue
+
+        visible_logs.append(entry)
+
+    return visible_logs
+
+
+def _is_prompt_response_tail_line(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    if not lowered:
+        return False
+
+    if any(marker in lowered for marker in PROMPT_RESPONSE_TAIL_MARKERS):
+        return True
+
+    if re.match(r"^\[[0-9]{2}/[0-9]{2}/[0-9]{2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2}\]\s+level\s+\d+", lowered):
+        return True
+
+    return False
 
 
 def _is_error_log_content(text: str) -> bool:
@@ -354,6 +579,8 @@ def _extract_prompt_response_from_lines(
 
         panel_content = _extract_panel_content(cleaned)
         if panel_content is not None:
+            if _is_prompt_response_tail_line(panel_content):
+                break
             captured_lines.append(panel_content)
             continue
 
@@ -362,6 +589,9 @@ def _extract_prompt_response_from_lines(
             # multiple framed blocks and markdown separators that would
             # otherwise cause premature truncation.
             continue
+
+        if _is_prompt_response_tail_line(stripped):
+            break
 
         captured_lines.append(stripped)
 
@@ -415,6 +645,8 @@ def _serialize_dashboard_snapshot(
     verbose_logs: bool,
     parallel_execution: bool,
     show_tool_logs: bool,
+    show_audit_logs: bool,
+    response_only: bool,
     tier_1_enabled: bool,
     tier_2_enabled: bool,
     tier_3_enabled: bool,
@@ -434,6 +666,8 @@ def _serialize_dashboard_snapshot(
         "verbose_logs": bool(verbose_logs),
         "parallel_execution": bool(parallel_execution),
         "show_tool_logs": bool(show_tool_logs),
+        "show_audit_logs": bool(show_audit_logs),
+        "response_only": bool(response_only),
         "tier_1_enabled": bool(tier_1_enabled),
         "tier_2_enabled": bool(tier_2_enabled),
         "tier_3_enabled": bool(tier_3_enabled),
@@ -497,6 +731,8 @@ def _deserialize_dashboard_snapshot(payload: str) -> dict[str, Any] | None:
         "verbose_logs": bool(parsed.get("verbose_logs", False)),
         "parallel_execution": bool(parsed.get("parallel_execution", True)),
         "show_tool_logs": bool(parsed.get("show_tool_logs", True)),
+        "show_audit_logs": bool(parsed.get("show_audit_logs", True)),
+        "response_only": bool(parsed.get("response_only", True)),
         "tier_1_enabled": bool(parsed.get("tier_1_enabled", True)),
         "tier_2_enabled": bool(parsed.get("tier_2_enabled", True)),
         "tier_3_enabled": bool(parsed.get("tier_3_enabled", True)),
@@ -734,10 +970,50 @@ class AgentDashboardState(rx.State):
     verbose_logs: bool = False
     parallel_execution: bool = True
     show_tool_logs: bool = True
+    show_audit_logs: bool = True
+    response_only: bool = True
+    global_search_mode: bool = False
+    admin_mode: bool = False
+    clear_confirmation_required: bool = False
     tier_1_enabled: bool = True
     tier_2_enabled: bool = True
     tier_3_enabled: bool = True
     tier_4_enabled: bool = True
+    show_config: bool = False
+    env_dict: dict[str, str] = {}
+    config_api_base_invalid: bool = False
+
+    @staticmethod
+    def _normalize_env_input(value: Any) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value or "")
+
+    @classmethod
+    def _build_config_env_dict(cls, loaded: dict[str, str]) -> dict[str, str]:
+        payload = {key: "" for key in CONFIG_CARD_ORDER}
+        payload["CERBERUS_API_BASE"] = str(
+            loaded.get("CERBERUS_API_BASE")
+            or loaded.get("CEREBRO_API_BASE")
+            or ""
+        )
+        payload["CEREBRO_MODEL"] = str(
+            loaded.get("CEREBRO_MODEL")
+            or loaded.get("CERBERUS_MODEL")
+            or ""
+        )
+        payload["CERBERUS_ACTIVE_CONTAINER"] = str(
+            loaded.get("CERBERUS_ACTIVE_CONTAINER")
+            or loaded.get("CEREBRO_ACTIVE_CONTAINER")
+            or ""
+        )
+        payload["REDIS_URL"] = str(
+            loaded.get("REDIS_URL")
+            or loaded.get("REFLEX_REDIS_URL")
+            or ""
+        )
+        payload["DEBUG_MODE"] = cls._normalize_env_input(loaded.get("DEBUG_MODE", "false"))
+        return payload
 
     def _intel_config_payload(self) -> dict[str, Any]:
         return {
@@ -745,6 +1021,10 @@ class AgentDashboardState(rx.State):
             "verbose_logs": bool(self.verbose_logs),
             "parallel_execution": bool(self.parallel_execution),
             "show_tool_logs": bool(self.show_tool_logs),
+            "show_audit_logs": bool(self.show_audit_logs),
+            "response_only": bool(self.response_only),
+            "global_search_mode": bool(self.global_search_mode),
+            "admin_mode": bool(self.admin_mode),
             "tier_1_enabled": bool(self.tier_1_enabled),
             "tier_2_enabled": bool(self.tier_2_enabled),
             "tier_3_enabled": bool(self.tier_3_enabled),
@@ -776,6 +1056,10 @@ class AgentDashboardState(rx.State):
                 self.verbose_logs = bool(payload.get("verbose_logs", self.verbose_logs))
                 self.parallel_execution = bool(payload.get("parallel_execution", self.parallel_execution))
                 self.show_tool_logs = bool(payload.get("show_tool_logs", self.show_tool_logs))
+                self.show_audit_logs = bool(payload.get("show_audit_logs", self.show_audit_logs))
+                self.response_only = bool(payload.get("response_only", self.response_only))
+                self.global_search_mode = bool(payload.get("global_search_mode", self.global_search_mode))
+                self.admin_mode = bool(payload.get("admin_mode", self.admin_mode))
                 self.tier_1_enabled = bool(payload.get("tier_1_enabled", self.tier_1_enabled))
                 self.tier_2_enabled = bool(payload.get("tier_2_enabled", self.tier_2_enabled))
                 self.tier_3_enabled = bool(payload.get("tier_3_enabled", self.tier_3_enabled))
@@ -848,6 +1132,99 @@ class AgentDashboardState(rx.State):
     def active_project(self) -> str:
         return str(self.project_id or "unknown")
 
+    @rx.var
+    def config_api_base(self) -> str:
+        return str(self.env_dict.get("CERBERUS_API_BASE", "") or "")
+
+    @rx.var
+    def config_model(self) -> str:
+        return str(self.env_dict.get("CEREBRO_MODEL", "") or "")
+
+    @rx.var
+    def config_active_container(self) -> str:
+        return str(self.env_dict.get("CERBERUS_ACTIVE_CONTAINER", "") or "")
+
+    @rx.var
+    def config_redis_url(self) -> str:
+        return str(self.env_dict.get("REDIS_URL", "") or "")
+
+    @rx.var
+    def config_debug_mode(self) -> bool:
+        value = str(self.env_dict.get("DEBUG_MODE", "false") or "false").strip().lower()
+        return value in {"1", "true", "yes", "on"}
+
+    @rx.var
+    def config_api_base_valid(self) -> bool:
+        return not bool(self.config_api_base_invalid)
+
+    @rx.var
+    def config_save_disabled(self) -> bool:
+        return bool(self.config_api_base_invalid)
+
+    @rx.var
+    def approval_modal_count(self) -> int:
+        return sum(1 for session in self.agent_sessions if session.approval_required)
+
+    @rx.event
+    def toggle_config(self) -> Any:
+        next_state = not bool(self.show_config)
+        if next_state:
+            try:
+                self.env_dict = self._build_config_env_dict(env_manager.load_config())
+                self.config_api_base_invalid = not bool(self.env_dict.get("CERBERUS_API_BASE", "").startswith(("http://", "https://")))
+            except Exception as exc:
+                return rx.toast.error(
+                    "Configuration load failed.",
+                    description=str(exc),
+                    position="top-right",
+                )
+        self.show_config = next_state
+
+    @rx.event
+    def set_env_value(self, key: str, value: Any) -> None:
+        updated = dict(self.env_dict)
+        normalized_key = str(key or "")
+        normalized_value = self._normalize_env_input(value)
+        updated[normalized_key] = normalized_value
+        self.env_dict = updated
+        if normalized_key == "CERBERUS_API_BASE":
+            self.config_api_base_invalid = not bool(normalized_value.startswith(("http://", "https://")))
+
+    @rx.event
+    def save_and_close(self) -> Any:
+        if not self.config_api_base_valid:
+            return rx.toast.error(
+                "CERBERUS_API_BASE must start with http.",
+                description="Use a full http:// or https:// URL before saving.",
+                position="top-right",
+            )
+
+        restarted_services: list[str] = []
+        try:
+            for key in CONFIG_CARD_ORDER:
+                restarted_services.extend(env_manager.update_env(key, self.env_dict.get(key, "")))
+        except Exception as exc:
+            return rx.toast.error(
+                "Configuration save failed.",
+                description=str(exc),
+                position="top-right",
+            )
+
+        self.show_config = False
+        self.env_dict = self._build_config_env_dict(env_manager.load_config())
+        self.config_api_base_invalid = not bool(self.env_dict.get("CERBERUS_API_BASE", "").startswith(("http://", "https://")))
+        self._refresh_session_metadata_from_runtime()
+        self._persist_dashboard_snapshot()
+        unique_services = sorted({service for service in restarted_services if service})
+        return rx.toast.success(
+            "Configuration updated.",
+            description=(
+                "Environment values were written to disk and applied to this process."
+                + (f" Restarted: {', '.join(unique_services)}." if unique_services else "")
+            ),
+            position="top-right",
+        )
+
     @rx.event
     def toggle_verbose_logs(self) -> None:
         self.verbose_logs = not bool(self.verbose_logs)
@@ -861,10 +1238,95 @@ class AgentDashboardState(rx.State):
         self._schedule_intel_config_persist()
 
     @rx.event
+    def toggle_show_audit_logs(self) -> None:
+        self.show_audit_logs = not bool(self.show_audit_logs)
+        self._persist_dashboard_snapshot()
+        self._schedule_intel_config_persist()
+
+    @rx.event
+    def toggle_response_only(self) -> None:
+        self.response_only = not bool(self.response_only)
+        self._persist_dashboard_snapshot()
+        self._schedule_intel_config_persist()
+
+    @rx.event
+    def toggle_global_search_mode(self) -> None:
+        self.global_search_mode = not bool(self.global_search_mode)
+        self._persist_dashboard_snapshot()
+        self._schedule_intel_config_persist()
+
+    @rx.event
+    def toggle_admin_mode(self) -> None:
+        self.admin_mode = not bool(self.admin_mode)
+        self._persist_dashboard_snapshot()
+        self._schedule_intel_config_persist()
+
+    @rx.event
     def toggle_parallel_execution(self) -> None:
         self.parallel_execution = not bool(self.parallel_execution)
         self._persist_dashboard_snapshot()
         self._schedule_intel_config_persist()
+
+    @rx.event
+    def request_clear_all(self) -> None:
+        self.clear_confirmation_required = True
+
+    @rx.event
+    def cancel_clear_all(self) -> None:
+        self.clear_confirmation_required = False
+
+    @rx.event(background=True)
+    async def confirm_clear_all(self) -> None:
+        async with self:
+            sessions_to_clear = [session.model_copy(deep=True) for session in self.agent_sessions]
+            client_token = str(self.cerberus_client_token or "").strip()
+            self.clear_confirmation_required = False
+
+        for session in sessions_to_clear:
+            try:
+                await terminate_action(self._orchestration_session_id_for_session(session))
+            except Exception:
+                continue
+
+        workspace_root = _default_workspaces_root()
+        try:
+            workspace_root.mkdir(parents=True, exist_ok=True)
+            for child in workspace_root.iterdir():
+                try:
+                    if child.is_dir():
+                        shutil.rmtree(child, ignore_errors=True)
+                    else:
+                        child.unlink(missing_ok=True)
+                except OSError:
+                    continue
+        except OSError:
+            pass
+
+        try:
+            TOOL_EVENT_LOG_PATH.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+        if client_token:
+            try:
+                manager = await get_redis_manager()
+                await manager.clear_history(client_token)
+                await manager.client.delete(f"cerberus:config:{client_token}")
+            except Exception:
+                pass
+
+        async with self:
+            self.agent_sessions = []
+            self.active_session_id = ""
+            self.cpu_usage = 24
+            self.ram_usage = 58
+            self.net_mbps = 8.4
+            self.alert_count = 0
+            self.sensor_health = "Nominal"
+            self.project_id = "unknown"
+            self.target_ip = "unknown"
+            self.session_uuid = "unknown"
+            self._persist_dashboard_snapshot()
 
     @rx.event
     def toggle_risk_tier(self, tier_number: int) -> None:
@@ -894,6 +1356,8 @@ class AgentDashboardState(rx.State):
             verbose_logs=self.verbose_logs,
             parallel_execution=self.parallel_execution,
             show_tool_logs=self.show_tool_logs,
+            show_audit_logs=self.show_audit_logs,
+            response_only=self.response_only,
             tier_1_enabled=self.tier_1_enabled,
             tier_2_enabled=self.tier_2_enabled,
             tier_3_enabled=self.tier_3_enabled,
@@ -927,6 +1391,8 @@ class AgentDashboardState(rx.State):
         self.verbose_logs = restored["verbose_logs"]
         self.parallel_execution = restored["parallel_execution"]
         self.show_tool_logs = restored["show_tool_logs"]
+        self.show_audit_logs = restored["show_audit_logs"]
+        self.response_only = restored["response_only"]
         self.tier_1_enabled = restored["tier_1_enabled"]
         self.tier_2_enabled = restored["tier_2_enabled"]
         self.tier_3_enabled = restored["tier_3_enabled"]
@@ -965,6 +1431,9 @@ class AgentDashboardState(rx.State):
                     self.session_uuid = restored["session_uuid"] or self.session_uuid
                     self.verbose_logs = restored["verbose_logs"]
                     self.parallel_execution = restored["parallel_execution"]
+                    self.show_tool_logs = restored["show_tool_logs"]
+                    self.show_audit_logs = restored["show_audit_logs"]
+                    self.response_only = restored["response_only"]
                     self.tier_1_enabled = restored["tier_1_enabled"]
                     self.tier_2_enabled = restored["tier_2_enabled"]
                     self.tier_3_enabled = restored["tier_3_enabled"]
@@ -1064,7 +1533,23 @@ class AgentDashboardState(rx.State):
 
     @rx.var
     def visible_sessions(self) -> list[AgentSession]:
-        return self.agent_sessions
+        visible_sessions: list[AgentSession] = []
+
+        for session in self.agent_sessions:
+            visible_logs = _visible_session_logs(
+                session.logs,
+                response_only=bool(self.response_only),
+                show_audit_logs=bool(self.show_audit_logs),
+            )
+            if visible_logs == session.logs:
+                visible_sessions.append(session)
+                continue
+
+            session_copy = session.model_copy(deep=True)
+            session_copy.logs = visible_logs
+            visible_sessions.append(session_copy)
+
+        return visible_sessions
 
     @rx.var
     def session_count(self) -> int:
@@ -1129,6 +1614,9 @@ class AgentDashboardState(rx.State):
     def _append_log(self, index: int, role: str, content: str, *, environment_label: str = "") -> None:
         cleaned = content.rstrip()
         if not cleaned:
+            return
+
+        if role == "Audit" and not bool(self.show_audit_logs):
             return
 
         if role in {"System", "Audit"} and not _is_error_log_content(cleaned):
@@ -1325,6 +1813,237 @@ class AgentDashboardState(rx.State):
         session.pending_message = message
         session.pending_risk_tier = risk_tier
         self._store_session(index, session)
+
+    def _append_terminal_feedback(self, index: int, content: str, *, role: str = "System") -> None:
+        cleaned = str(content or "").strip()
+        if not cleaned:
+            return
+        session = self._session_copy(index)
+        session.logs = [*session.logs, _log_entry(role, cleaned)][-MAX_LOG_ENTRIES:]
+        self._store_session(index, session)
+
+    @staticmethod
+    def _parse_slash_command(command_text: str) -> tuple[str, list[str]]:
+        stripped = str(command_text or "").strip()
+        if not stripped:
+            return "", []
+        try:
+            tokens = shlex.split(stripped, posix=os.name != "nt")
+        except Exception:
+            tokens = stripped.split()
+        if not tokens:
+            return "", []
+        return tokens[0].lower(), tokens[1:]
+
+    @staticmethod
+    def _build_help_summary() -> str:
+        lines = ["Available slash commands:"]
+        for command, metadata in COMMAND_REGISTRY.items():
+            tier = int(metadata.get("tier", 1) or 1)
+            desc = str(metadata.get("desc", "") or "")
+            lines.append(f"{command} (Tier {tier}) - {desc}")
+        return "\n".join(lines)
+
+    async def _reset_session_context(self, index: int) -> None:
+        session = self._session_copy(index)
+        session.logs = []
+        session.command_input = ""
+        session.status = "ready"
+        session.is_busy = False
+        session.termination_requested = False
+        session.approval_required = False
+        session.pending_action = None
+        session.pending_approval_source = ""
+        session.pending_tool_name = ""
+        session.pending_raw_arguments = ""
+        session.pending_repaired_arguments = ""
+        session.pending_message = ""
+        session.pending_risk_tier = 0
+        session.policy_history = []
+        session.tier_status = _default_tier_status()
+        session.last_command = ""
+        session.active_tool_name = ""
+        session.status_line = "Agent context reset by operator."
+        session.prompt_stream_lines = []
+        session.prompt_response_log_index = None
+        session.stream_log_index = None
+        session.stream_call_id = ""
+        self._store_session(index, session)
+
+        client_token = str(self.cerberus_client_token or "").strip()
+        if client_token:
+            try:
+                manager = await get_redis_manager()
+                await manager.clear_history(client_token)
+            except Exception:
+                pass
+
+        self._append_terminal_feedback(index, "System: Agent session reset and Redis-backed history cleared.")
+        self._refresh_system_health()
+
+    def _export_session_logs(self, index: int) -> Path:
+        session = self._session_copy(index)
+        logs_dir = REPO_ROOT / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = logs_dir / f"{session.session_id.lower()}_{stamp}.jsonl"
+        with output_path.open("w", encoding="utf-8") as handle:
+            for entry in session.logs:
+                handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
+        return output_path
+
+    def _archive_session(self, index: int) -> Path:
+        """Archive the current session as a Mission Report."""
+        from cerberus.infrastructure.reporting import archive_session as archive_log
+        
+        session = self._session_copy(index)
+        logs_dir = REPO_ROOT / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        
+        # First export logs
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = logs_dir / f"{session.session_id.lower()}_{stamp}.jsonl"
+        with log_path.open("w", encoding="utf-8") as handle:
+            for entry in session.logs:
+                handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
+        
+        # Then archive to mission report
+        archive_dir = REPO_ROOT / "archive"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        
+        security_summary = f"Session {session.session_id} archived. Status: {session.status}"
+        report_path = archive_log(log_path, archive_dir=archive_dir, custom_summary=security_summary)
+        
+        return report_path
+
+    async def _dispatch_slash_command(self, index: int, command_text: str) -> None:
+        command_name, _args = self._parse_slash_command(command_text)
+        if not command_name:
+            self._append_terminal_feedback(index, "System: Empty command received.")
+            return
+
+        if command_name == "/agent":
+            if self._apply_agent_switch_command(index, command_text):
+                self._persist_dashboard_snapshot()
+            return
+
+        metadata = COMMAND_REGISTRY.get(command_name)
+        if metadata is None:
+            self._append_terminal_feedback(index, f"System: Command not recognized: {command_name}")
+            return
+
+        command_tier = int(metadata.get("tier", 1) or 1)
+        if command_tier >= 3 and not bool(self.admin_mode):
+            self._append_terminal_feedback(
+                index,
+                f"System: Permission Required. {command_name} is Tier-{command_tier} and requires Admin mode.",
+            )
+            return
+
+        if command_name == "/clear":
+            session = self._session_copy(index)
+            session.logs = []
+            session.command_input = ""
+            session.status = "ready"
+            session.is_busy = False
+            session.status_line = "Terminal cleared by operator command."
+            self._store_session(index, session)
+            self._append_terminal_feedback(index, "System: Active terminal cleared.")
+            self._refresh_system_health()
+            return
+
+        if command_name == "/reset":
+            await self._reset_session_context(index)
+            return
+
+        if command_name == "/search":
+            self.global_search_mode = not bool(self.global_search_mode)
+            self._persist_dashboard_snapshot()
+            self._schedule_intel_config_persist()
+            mode_label = "ON" if self.global_search_mode else "OFF"
+            self._append_terminal_feedback(index, f"System: Global Search Mode is now {mode_label}.")
+            return
+
+        if command_name == "/approve":
+            if index >= len(self.agent_sessions):
+                return
+            session = self._session_copy(index)
+            if not isinstance(session.pending_action, dict):
+                self._append_terminal_feedback(index, "System: No pending Tier-4 action is awaiting approval.")
+                return
+            await self.approve_pending_action(session.session_id)
+            self._append_terminal_feedback(index, "System: Approval signal sent to release the Safety Cage.")
+            return
+
+        if command_name == "/logs":
+            output_path = self._export_session_logs(index)
+            try:
+                relative_path = output_path.relative_to(REPO_ROOT)
+                rendered_path = str(relative_path)
+            except ValueError:
+                rendered_path = str(output_path)
+            self._append_terminal_feedback(index, f"System: Session logs exported to {rendered_path}.")
+            return
+
+        if command_name == "/archive":
+            try:
+                report_path = self._archive_session(index)
+                if report_path.exists():
+                    try:
+                        relative_path = report_path.relative_to(REPO_ROOT)
+                        rendered_path = str(relative_path)
+                    except ValueError:
+                        rendered_path = str(report_path)
+                    self._append_terminal_feedback(index, f"System: Session archived to Mission Report: {rendered_path}")
+                else:
+                    self._append_terminal_feedback(index, "System: Failed to archive session.")
+            except Exception as e:
+                self._append_terminal_feedback(index, f"System: Archive error: {str(e)[:100]}")
+            return
+
+        if command_name == "/help":
+            self._append_terminal_feedback(index, self._build_help_summary())
+            return
+
+    @rx.event
+    def run_quick_command(self, command: str) -> Any:
+        normalized = str(command or "").strip()
+        index = self._index_for_session_id(self.active_session_id)
+        if index is None:
+            return rx.toast.error(
+                "No active session.",
+                description="Attach an agent terminal before executing quick commands.",
+                position="top-right",
+            )
+
+        command_name, _args = self._parse_slash_command(normalized)
+        metadata = COMMAND_REGISTRY.get(command_name)
+        if metadata is None:
+            return rx.toast.error(
+                "Unknown command.",
+                description=normalized or "(empty)",
+                position="top-right",
+            )
+
+        command_tier = int(metadata.get("tier", 1) or 1)
+        if command_tier >= 3 and not bool(self.admin_mode):
+            return rx.toast.warning(
+                "Permission Required",
+                description=f"{command_name} is Tier-{command_tier}. Enable Admin Mode first.",
+                position="top-right",
+            )
+
+        session = self._session_copy(index)
+        session.command_input = normalized
+        self._store_session(index, session)
+        return [
+            rx.toast.info(
+                "Quick command queued.",
+                description=normalized,
+                position="top-right",
+            ),
+            AgentDashboardState.process_session_command(session.session_id),
+        ]
 
     def _append_policy_history(
         self,
@@ -1564,6 +2283,7 @@ class AgentDashboardState(rx.State):
         risk_tier = int(output.get("risk_tier", 0) or 0)
         return {
             "approval_source": "runtime_tool_validation",
+            "approval_state": "AWAITING_APPROVAL",
             "tool_name": tool_name,
             "status": "PENDING_APPROVAL",
             "message": str(output.get("message", "Tool execution paused pending operator approval.") or "").strip(),
@@ -1840,6 +2560,8 @@ class AgentDashboardState(rx.State):
                 return
             session = self._session_copy(index)
             role = self._role_for_runtime_event(channel, session.active_tool_name)
+            if role == "Audit" and not bool(self.show_audit_logs):
+                return
             if role in {"System", "Audit"} and not _is_error_log_content(text):
                 return
             session.logs = [
@@ -2150,6 +2872,22 @@ class AgentDashboardState(rx.State):
                         output=execution_result.output,
                     )
                     self._set_pending_action(index, pending_action=pending_action, approval_required=True)
+                    client_token = str(self.cerberus_client_token or "").strip()
+                    if client_token:
+                        asyncio.create_task(
+                            broadcast_state_change(
+                                client_token,
+                                "AWAITING_APPROVAL",
+                                index=index,
+                                metadata={
+                                    "session_id": current_session.session_id,
+                                    "tool_name": str(pending_action.get("tool_name", "") or ""),
+                                    "arguments": pending_action.get("arguments", {}),
+                                    "risk_tier": int(pending_action.get("risk_tier", 4) or 4),
+                                    "approval_source": str(pending_action.get("approval_source", "") or ""),
+                                },
+                            )
+                        )
                     self._append_log(
                         index,
                         "Audit",
@@ -2183,15 +2921,27 @@ class AgentDashboardState(rx.State):
                 return
 
             if execution_result.tool_name == PROMPT_DISPATCH_TOOL:
-                self._finalize_prompt_dispatch_output(index, execution_result.output)
-                self._apply_report_state(
-                    index,
-                    report,
-                    is_busy=False,
-                    status_line="LLM response received.",
-                    manual_approval_granted=manual_approval_granted,
-                )
-                self._refresh_system_health()
+                status_line = "LLM response received."
+                try:
+                    self._finalize_prompt_dispatch_output(index, execution_result.output)
+                except Exception as exc:
+                    # Never let prompt formatting failures keep the command bar locked.
+                    status_line = "LLM response received (formatter fallback)."
+                    self._append_log(index, "Audit", f"⚠ Prompt finalize fallback engaged: {exc}")
+                    fallback_text = ""
+                    if isinstance(execution_result.output, str):
+                        fallback_text = _sanitize_prompt_response_text(execution_result.output)
+                    if fallback_text:
+                        self._upsert_prompt_response_log(index, fallback_text)
+                finally:
+                    self._apply_report_state(
+                        index,
+                        report,
+                        is_busy=False,
+                        status_line=status_line,
+                        manual_approval_granted=manual_approval_granted,
+                    )
+                    self._refresh_system_health()
                 return
 
             arguments = execution_result.arguments or action.get("arguments", {})
@@ -2296,8 +3046,20 @@ class AgentDashboardState(rx.State):
                     status_line="Execution timed out.",
                 )
                 self._refresh_system_health()
+        except Exception as exc:
+            async with self:
+                self._append_log(index, "System", f"⚠ Unexpected runtime failure: {exc}")
+                self._apply_report_state(
+                    index,
+                    report,
+                    is_busy=False,
+                    status="error",
+                    status_line="Execution failed unexpectedly. Prompt unlocked.",
+                )
+                self._refresh_system_health()
 
     async def _start_session_command(self, session_id: str, command: str | None = None) -> None:
+        slash_command_text = ""
         async with self:
             index = self._index_for_session_id(session_id)
             if index is None:
@@ -2310,6 +3072,25 @@ class AgentDashboardState(rx.State):
 
             if self._apply_agent_switch_command(index, command_text):
                 self._persist_dashboard_snapshot()
+                return
+
+            if command_text.startswith("/"):
+                slash_command_text = command_text
+                session.command_input = ""
+                self._store_session(index, session)
+                self._refresh_system_health()
+
+        if slash_command_text:
+            await self._dispatch_slash_command(index, slash_command_text)
+            return
+
+        async with self:
+            if index >= len(self.agent_sessions):
+                return
+
+            session = self._session_copy(index)
+            command_text = (command if command is not None else session.command_input).strip()
+            if not command_text or session.is_busy or session.status == "error":
                 return
 
             action = self._parse_prompt_to_action(command_text)
@@ -2546,7 +3327,7 @@ class AgentDashboardState(rx.State):
                     "status": "REJECTED_BY_OPERATOR",
                     "error": "tool_execution_rejected_by_operator",
                     "tool": denied_tool,
-                    "message": "Operator rejected Tier-4 repaired arguments. Choose a safer action.",
+                    "message": APPROVAL_REJECTION_MESSAGE,
                     "raw_arguments": session.pending_action.get("raw_arguments"),
                     "repaired_arguments": session.pending_action.get("repaired_arguments"),
                     "risk_tier": session.pending_action.get("risk_tier", 4),
@@ -3057,6 +3838,7 @@ def terminal_window(session: AgentSession) -> rx.Component:
                         rx.button(
                             "Reject",
                             on_click=AgentDashboardState.deny_pending_action(session.session_id),
+                            custom_attrs={"data-approval-reject": session.session_id},
                             background="rgba(255, 107, 107, 0.12)",
                             color="#FF9B9B",
                             border="1px solid rgba(255, 107, 107, 0.65)",
@@ -3066,6 +3848,7 @@ def terminal_window(session: AgentSession) -> rx.Component:
                         rx.button(
                             "Approve",
                             on_click=AgentDashboardState.approve_pending_action(session.session_id),
+                            custom_attrs={"data-approval-approve": session.session_id},
                             background="rgba(0, 255, 255, 0.14)",
                             color=NEON_CYAN,
                             border=f"1px solid {NEON_CYAN}",
@@ -3082,6 +3865,7 @@ def terminal_window(session: AgentSession) -> rx.Component:
                 position="absolute",
                 inset="14px",
                 z_index="4",
+                custom_attrs={"data-terminal-approval-panel": session.session_id},
                 border="1px solid rgba(255, 107, 107, 0.7)",
                 border_radius="14px",
                 background="linear-gradient(180deg, rgba(35, 6, 6, 0.94) 0%, rgba(14, 4, 4, 0.95) 100%)",
@@ -3122,6 +3906,121 @@ def terminal_window(session: AgentSession) -> rx.Component:
             "data-session-id": session.session_id,
             "data-session-state": rx.cond(session.is_busy, "busy", "active"),
         },
+    )
+
+
+def approval_modal(session: AgentSession) -> rx.Component:
+    return rx.cond(
+        session.approval_required,
+        rx.box(
+            rx.box(
+                rx.vstack(
+                    rx.hstack(
+                        rx.vstack(
+                            rx.text(
+                                "Approval Required",
+                                color="#FF9B9B",
+                                font_size="1.1rem",
+                                font_weight="700",
+                                letter_spacing="0.08em",
+                                text_transform="uppercase",
+                            ),
+                            rx.text(
+                                "A Tier-4 tool requested operator approval before execution.",
+                                color=MUTED_TEXT,
+                                font_size="0.78rem",
+                            ),
+                            spacing="1",
+                            align="start",
+                        ),
+                        rx.spacer(),
+                        rx.text(
+                            f"Tier {session.pending_risk_tier}",
+                            color=NEON_CYAN,
+                            font_size="0.72rem",
+                            border="1px solid rgba(0, 255, 255, 0.32)",
+                            border_radius="999px",
+                            padding="4px 10px",
+                            background="rgba(0, 24, 24, 0.7)",
+                        ),
+                        width="100%",
+                        align="start",
+                    ),
+                    rx.hstack(
+                        rx.text("Agent", color=MUTED_TEXT, font_size="0.7rem", text_transform="uppercase"),
+                        rx.spacer(),
+                        rx.text(session.session_id, color=TEXT_PRIMARY, font_size="0.8rem", font_weight="700"),
+                        width="100%",
+                    ),
+                    rx.hstack(
+                        rx.text("Tool", color=MUTED_TEXT, font_size="0.7rem", text_transform="uppercase"),
+                        rx.spacer(),
+                        rx.text(session.pending_tool_name, color=TEXT_PRIMARY, font_size="0.8rem", font_weight="700"),
+                        width="100%",
+                    ),
+                    rx.text(session.pending_message, color="#FFD166", font_size="0.76rem", width="100%"),
+                    rx.text("Arguments", color=MUTED_TEXT, font_size="0.68rem", letter_spacing="0.08em", text_transform="uppercase"),
+                    rx.el.pre(
+                        session.pending_repaired_arguments,
+                        custom_attrs={"data-approval-arguments": session.session_id},
+                        width="100%",
+                        max_height="180px",
+                        overflow="auto",
+                        background="rgba(0, 0, 0, 0.82)",
+                        border="1px solid rgba(0, 255, 255, 0.25)",
+                        border_radius="12px",
+                        padding="12px",
+                        color="#BBFFFF",
+                        font_size="0.68rem",
+                        white_space="pre-wrap",
+                    ),
+                    rx.hstack(
+                        rx.button(
+                            "APPROVE",
+                            on_click=AgentDashboardState.approve_pending_action(session.session_id),
+                            custom_attrs={"data-approval-modal-approve": session.session_id},
+                            background="rgba(0, 255, 255, 0.14)",
+                            color=NEON_CYAN,
+                            border=f"1px solid {NEON_CYAN}",
+                            min_width="10rem",
+                            _hover={"background": "rgba(0, 255, 255, 0.22)"},
+                        ),
+                        rx.button(
+                            "REJECT",
+                            on_click=AgentDashboardState.deny_pending_action(session.session_id),
+                            custom_attrs={"data-approval-modal-reject": session.session_id},
+                            background="rgba(255, 107, 107, 0.12)",
+                            color="#FF9B9B",
+                            border="1px solid rgba(255, 107, 107, 0.62)",
+                            min_width="10rem",
+                            _hover={"background": "rgba(255, 107, 107, 0.2)"},
+                        ),
+                        width="100%",
+                        justify="end",
+                        spacing="3",
+                    ),
+                    spacing="3",
+                    align="stretch",
+                    width="min(40rem, 92vw)",
+                ),
+                custom_attrs={"data-approval-modal": session.session_id},
+                border="1px solid rgba(255, 107, 107, 0.68)",
+                border_radius="18px",
+                background="linear-gradient(180deg, rgba(22, 5, 5, 0.98) 0%, rgba(10, 2, 2, 0.98) 100%)",
+                box_shadow="0 24px 80px rgba(0, 0, 0, 0.55)",
+                padding="20px",
+                width="min(40rem, 92vw)",
+            ),
+            position="fixed",
+            inset="0",
+            z_index="1500",
+            display="flex",
+            align_items="center",
+            justify_content="center",
+            background="rgba(0, 0, 0, 0.72)",
+            backdrop_filter="blur(6px)",
+        ),
+        rx.box(display="none"),
     )
 
 
@@ -3200,11 +4099,71 @@ def system_sidebar() -> rx.Component:
             spacing="2",
             custom_attrs={"data-control-row": control_key},
         )
+    
+    def health_metric(label: str, value: rx.Var | str, unit: str = "", color_dynamic: rx.Var[str] | str = NEON_CYAN) -> rx.Component:
+        """Display a system health metric (CPU, RAM, Network)."""
+        return rx.hstack(
+            rx.text(label, color=MUTED_TEXT, font_size="0.68rem", letter_spacing="0.06em", width="50px"),
+            rx.spacer(),
+            rx.hstack(
+                rx.text(
+                    value,
+                    color=color_dynamic,
+                    font_size="0.84rem",
+                    font_weight="700",
+                    font_family='"JetBrains Mono", monospace',
+                ),
+                rx.text(
+                    unit,
+                    color=color_dynamic,
+                    font_size="0.84rem",
+                    font_weight="700",
+                    font_family='"JetBrains Mono", monospace',
+                ) if unit else rx.text(""),
+                   spacing="0",
+            ),
+            width="100%",
+            align="center",
+            spacing="2",
+        )
 
     return neon_panel(
         rx.vstack(
             rx.text("INTEL DRAWER", color=NEON_GREEN, font_size="0.98rem", font_weight="700", letter_spacing="0.08em"),
             rx.text("Live runtime controls and metadata.", color=MUTED_TEXT, font_size="0.72rem"),
+            # System Health Section
+            rx.el.details(
+                rx.el.summary(
+                    "System Health",
+                    style={
+                        "cursor": "pointer",
+                        "color": NEON_CYAN,
+                        "fontSize": "0.76rem",
+                        "fontWeight": "700",
+                        "letterSpacing": "0.08em",
+                        "textTransform": "uppercase",
+                    },
+                ),
+                rx.vstack(
+                    health_metric("CPU", AgentDashboardState.cpu_usage, "%"),
+                    health_metric("RAM", AgentDashboardState.ram_usage, "%"),
+                    health_metric("NET", AgentDashboardState.net_mbps, " Mb/s"),
+                    rx.text(
+                        f"Agents: {0}",  # Placeholder - will be dynamic
+                        color=NEON_GREEN,
+                        font_size="0.72rem",
+                        font_weight="600",
+                    ),
+                    spacing="2",
+                    width="100%",
+                    align="stretch",
+                    padding_top="8px",
+                    padding_bottom="8px",
+                    border_bottom="1px solid rgba(0, 255, 0, 0.12)",
+                ),
+                style={"width": "100%"},
+                open=True,  # Keep open by default for visibility
+            ),
             rx.cond(
                 AgentDashboardState.intel_drawer_alert,
                 neon_panel(
@@ -3237,6 +4196,10 @@ def system_sidebar() -> rx.Component:
                     control_row("verbose_logs", "Verbose Logs", AgentDashboardState.verbose_logs, AgentDashboardState.toggle_verbose_logs),
                     control_row("parallel_execution", "Parallel Execution", AgentDashboardState.parallel_execution, AgentDashboardState.toggle_parallel_execution),
                     control_row("show_tool_logs", "Show Tool Logs", AgentDashboardState.show_tool_logs, AgentDashboardState.toggle_show_tool_logs),
+                    control_row("show_audit_logs", "Show Audit Logs", AgentDashboardState.show_audit_logs, AgentDashboardState.toggle_show_audit_logs),
+                    control_row("response_only", "Response Only", AgentDashboardState.response_only, AgentDashboardState.toggle_response_only),
+                    control_row("global_search_mode", "Global Search Mode", AgentDashboardState.global_search_mode, AgentDashboardState.toggle_global_search_mode),
+                    control_row("admin_mode", "Admin Mode", AgentDashboardState.admin_mode, AgentDashboardState.toggle_admin_mode),
                     spacing="2",
                     width="100%",
                     align="stretch",
@@ -3425,6 +4388,73 @@ def system_sidebar() -> rx.Component:
                         align="start",
                         width="100%",
                     ),
+                ),
+                style={"width": "100%"},
+            ),
+            rx.el.details(
+                rx.el.summary(
+                    "Clear",
+                    style={
+                        "cursor": "pointer",
+                        "color": "#FF6B6B",
+                        "fontSize": "0.76rem",
+                        "fontWeight": "700",
+                        "letterSpacing": "0.08em",
+                        "textTransform": "uppercase",
+                    },
+                ),
+                neon_panel(
+                    rx.vstack(
+                        rx.text("Delete all logs, workspaces, and sessions.", color="#FFB4B4", font_size="0.68rem"),
+                        rx.cond(
+                            AgentDashboardState.clear_confirmation_required,
+                            rx.vstack(
+                                rx.text("Are you sure?", color="#FF6B6B", font_size="0.74rem", font_weight="700"),
+                                rx.hstack(
+                                    rx.button(
+                                        "YES, CLEAR ALL",
+                                        on_click=AgentDashboardState.confirm_clear_all,
+                                        background="rgba(255, 107, 107, 0.16)",
+                                        color="#FF6B6B",
+                                        border="1px solid rgba(255, 107, 107, 0.72)",
+                                        _hover={"background": "rgba(255, 107, 107, 0.24)"},
+                                        width="100%",
+                                    ),
+                                    rx.button(
+                                        "CANCEL",
+                                        on_click=AgentDashboardState.cancel_clear_all,
+                                        background="rgba(0, 255, 255, 0.10)",
+                                        color=NEON_CYAN,
+                                        border=f"1px solid {NEON_CYAN}",
+                                        _hover={"background": "rgba(0, 255, 255, 0.18)"},
+                                        width="100%",
+                                    ),
+                                    spacing="2",
+                                    width="100%",
+                                ),
+                                spacing="2",
+                                width="100%",
+                                align="stretch",
+                            ),
+                            rx.button(
+                                "CLEAR",
+                                on_click=AgentDashboardState.request_clear_all,
+                                background="rgba(255, 107, 107, 0.12)",
+                                color="#FF6B6B",
+                                border="1px solid rgba(255, 107, 107, 0.68)",
+                                _hover={"background": "rgba(255, 107, 107, 0.2)"},
+                                width="100%",
+                            ),
+                        ),
+                        spacing="2",
+                        width="100%",
+                        align="stretch",
+                    ),
+                    border="1px solid rgba(255, 107, 107, 0.62)",
+                    background="rgba(30, 6, 6, 0.72)",
+                    padding="10px",
+                    border_radius="10px",
+                    width="100%",
                 ),
                 style={"width": "100%"},
             ),
@@ -3715,30 +4745,380 @@ def metadata_drawer() -> rx.Component:
     )
 
 
-def index() -> rx.Component:
-    return rx.box(
-        metadata_drawer(),
-        rx.box(
-            rx.vstack(
-                workspace_grid(),
-                spacing="4",
-                align="stretch",
+def top_header_bar() -> rx.Component:
+    return rx.hstack(
+        rx.vstack(
+            rx.text(
+                "Cerberus AI",
+                color=TEXT_PRIMARY,
+                font_size="1rem",
+                font_weight="700",
+                letter_spacing="0.12em",
+                text_transform="uppercase",
+            ),
+            rx.text(
+                "Operator grid and runtime configuration",
+                color=MUTED_TEXT,
+                font_size="0.72rem",
+            ),
+            spacing="1",
+            align="start",
+        ),
+        rx.spacer(),
+        rx.button(
+            rx.hstack(
+                rx.icon(tag="settings", size=16),
+                rx.text("Config", font_weight="700"),
+                spacing="2",
+                align="center",
+            ),
+            custom_attrs={"data-config-button": "true"},
+            on_click=AgentDashboardState.toggle_config,
+            background="rgba(0, 0, 0, 0.82)",
+            color=NEON_GREEN,
+            border=f"1px solid {NEON_GREEN}",
+            border_radius="12px",
+            font_family='"JetBrains Mono", "Courier New", monospace',
+            box_shadow="0 0 14px rgba(0, 255, 0, 0.28)",
+            _hover={"background": "rgba(0, 255, 0, 0.12)"},
+        ),
+        rx.menu.root(
+            rx.menu.trigger(
+                rx.button(
+                    rx.hstack(
+                        rx.icon(tag="terminal", size=16),
+                        rx.text("Commands", font_weight="700"),
+                        spacing="2",
+                        align="center",
+                    ),
+                    custom_attrs={"data-command-menu-button": "true"},
+                    background="rgba(0, 20, 0, 0.92)",
+                    color=NEON_GREEN,
+                    border=f"1px solid {NEON_GREEN}",
+                    border_radius="12px",
+                    font_family='"JetBrains Mono", "Courier New", monospace',
+                    box_shadow="0 0 16px rgba(0, 255, 0, 0.33)",
+                    _hover={"background": "rgba(0, 255, 0, 0.16)"},
+                ),
+            ),
+            rx.menu.content(
+                rx.foreach(
+                    COMMAND_MENU_ITEMS,
+                    lambda item: rx.menu.item(
+                        rx.hstack(
+                            rx.vstack(
+                                rx.text(item["command"], color=TEXT_PRIMARY, font_size="0.74rem", font_weight="700"),
+                                rx.text(item["desc"], color=MUTED_TEXT, font_size="0.68rem"),
+                                spacing="1",
+                                align="start",
+                            ),
+                            rx.spacer(),
+                            rx.badge(
+                                rx.hstack(
+                                    rx.text("T", color=NEON_GREEN, font_size="0.68rem", font_weight="700"),
+                                    rx.text(item["tier"], color=NEON_GREEN, font_size="0.68rem", font_weight="700"),
+                                    spacing="1",
+                                    align="center",
+                                ),
+                                background="rgba(0, 255, 0, 0.1)",
+                                color=NEON_GREEN,
+                                border="1px solid rgba(0, 255, 0, 0.45)",
+                            ),
+                            width="100%",
+                            align="center",
+                            spacing="2",
+                        ),
+                        custom_attrs={"data-command-menu-item": "true"},
+                        on_select=AgentDashboardState.run_quick_command(item["command"]),
+                    ),
+                ),
+                background="rgba(0, 0, 0, 0.96)",
+                border="1px solid rgba(0, 255, 0, 0.42)",
+                border_radius="12px",
+                min_width="360px",
+                padding="8px",
+            ),
+        ),
+        position="fixed",
+        top="18px",
+        left="76px",
+        right="20px",
+        z_index="1100",
+        background="rgba(0, 0, 0, 0.72)",
+        border=f"1px solid rgba(0, 255, 0, 0.22)",
+        border_radius="16px",
+        box_shadow="0 18px 32px rgba(0, 0, 0, 0.36)",
+        backdrop_filter="blur(12px)",
+        padding="12px 16px",
+        align="center",
+        width="auto",
+    )
+
+
+def config_text_card(key: str, label: str, description: str, value: Var | str, placeholder: str = "") -> rx.Component:
+    return neon_panel(
+        rx.vstack(
+            rx.hstack(
+                rx.vstack(
+                    rx.text(label, color=TEXT_PRIMARY, font_size="0.86rem", font_weight="700"),
+                    rx.text(description, color=MUTED_TEXT, font_size="0.72rem", line_height="1.5"),
+                    spacing="1",
+                    align="start",
+                ),
+                rx.spacer(),
+                rx.text(
+                    CONFIG_CARD_TARGETS[key],
+                    color=NEON_CYAN,
+                    font_size="0.66rem",
+                    padding="4px 8px",
+                    border="1px solid rgba(0, 255, 255, 0.25)",
+                    border_radius="999px",
+                    background="rgba(0, 24, 24, 0.68)",
+                ),
                 width="100%",
-                height="100%",
+                align="start",
+            ),
+            rx.input(
+                value=value,
+                placeholder=placeholder,
+                custom_attrs={"data-config-input": key},
+                on_change=lambda next_value: AgentDashboardState.set_env_value(key, next_value),
+                background="rgba(0, 0, 0, 0.88)",
+                color=TEXT_PRIMARY,
+                border=f"1px solid rgba(0, 255, 0, 0.26)",
+                focus_border_color=NEON_CYAN,
+                font_family='"JetBrains Mono", "Courier New", monospace',
+                size="3",
+            ),
+            spacing="3",
+            align="stretch",
+            width="100%",
+        )
+    )
+
+
+def config_switch_card(key: str, label: str, description: str, checked: Var | bool) -> rx.Component:
+    return neon_panel(
+        rx.hstack(
+            rx.vstack(
+                rx.text(label, color=TEXT_PRIMARY, font_size="0.86rem", font_weight="700"),
+                rx.text(description, color=MUTED_TEXT, font_size="0.72rem", line_height="1.5"),
+                rx.text(
+                    CONFIG_CARD_TARGETS[key],
+                    color=NEON_CYAN,
+                    font_size="0.66rem",
+                    padding="4px 8px",
+                    border="1px solid rgba(0, 255, 255, 0.25)",
+                    border_radius="999px",
+                    background="rgba(0, 24, 24, 0.68)",
+                    width="fit-content",
+                ),
+                spacing="2",
+                align="start",
+            ),
+            rx.spacer(),
+            rx.vstack(
+                rx.switch(
+                    checked=checked,
+                    custom_attrs={"data-config-switch": key},
+                    on_change=lambda next_value: AgentDashboardState.set_env_value(key, next_value),
+                    color_scheme="green",
+                    size="3",
+                ),
+                rx.text(
+                    rx.cond(checked, "Enabled", "Disabled"),
+                    color=rx.cond(checked, NEON_GREEN, MUTED_TEXT),
+                    font_size="0.72rem",
+                    font_weight="700",
+                ),
+                spacing="2",
+                align="center",
+            ),
+            width="100%",
+            align="center",
+            spacing="4",
+        )
+    )
+
+
+def config_manager_overlay() -> rx.Component:
+    return rx.box(
+        rx.vstack(
+            rx.hstack(
+                rx.vstack(
+                    rx.text(
+                        "Configuration Manager",
+                        color=TEXT_PRIMARY,
+                        font_size="1.35rem",
+                        font_weight="700",
+                        letter_spacing="0.08em",
+                        text_transform="uppercase",
+                    ),
+                    rx.text(
+                        "Edit live runtime values and persist them back to the repository env files.",
+                        color=MUTED_TEXT,
+                        font_size="0.8rem",
+                    ),
+                    spacing="1",
+                    align="start",
+                ),
+                rx.spacer(),
+                rx.text(
+                    "Root aliases resolve to .env. Dashboard-only values resolve to dockerized/.env/*.",
+                    color=NEON_CYAN,
+                    font_size="0.72rem",
+                    max_width="26rem",
+                    text_align="right",
+                ),
+                width="100%",
+                align="start",
+            ),
+            rx.cond(
+                AgentDashboardState.config_api_base_valid,
+                rx.box(display="none"),
+                rx.text(
+                    "CERBERUS_API_BASE must start with http:// or https:// before you can save.",
+                    color="#FF6B6B",
+                    font_size="0.76rem",
+                    padding="10px 12px",
+                    border="1px solid rgba(255, 107, 107, 0.35)",
+                    border_radius="12px",
+                    background="rgba(44, 10, 10, 0.72)",
+                    width="100%",
+                ),
+            ),
+            rx.box(
+                rx.vstack(
+                    config_text_card(
+                        "CERBERUS_API_BASE",
+                        "CERBERUS_API_BASE",
+                        CONFIG_CARD_DESCRIPTIONS["CERBERUS_API_BASE"],
+                        AgentDashboardState.config_api_base,
+                        placeholder=CONFIG_CARD_PLACEHOLDERS["CERBERUS_API_BASE"],
+                    ),
+                    config_text_card(
+                        "CEREBRO_MODEL",
+                        "CEREBRO_MODEL",
+                        CONFIG_CARD_DESCRIPTIONS["CEREBRO_MODEL"],
+                        AgentDashboardState.config_model,
+                        placeholder=CONFIG_CARD_PLACEHOLDERS["CEREBRO_MODEL"],
+                    ),
+                    config_text_card(
+                        "CERBERUS_ACTIVE_CONTAINER",
+                        "CERBERUS_ACTIVE_CONTAINER",
+                        CONFIG_CARD_DESCRIPTIONS["CERBERUS_ACTIVE_CONTAINER"],
+                        AgentDashboardState.config_active_container,
+                        placeholder=CONFIG_CARD_PLACEHOLDERS["CERBERUS_ACTIVE_CONTAINER"],
+                    ),
+                    config_text_card(
+                        "REDIS_URL",
+                        "REDIS_URL",
+                        CONFIG_CARD_DESCRIPTIONS["REDIS_URL"],
+                        AgentDashboardState.config_redis_url,
+                        placeholder=CONFIG_CARD_PLACEHOLDERS["REDIS_URL"],
+                    ),
+                    config_switch_card(
+                        "DEBUG_MODE",
+                        "DEBUG_MODE",
+                        CONFIG_CARD_DESCRIPTIONS["DEBUG_MODE"],
+                        AgentDashboardState.config_debug_mode,
+                    ),
+                    spacing="4",
+                    align="stretch",
+                    width="100%",
+                    padding_bottom="112px",
+                ),
+                width="100%",
+                flex="1",
                 min_height="0",
-                margin_top="4rem",
+                overflow_y="auto",
+                padding_right="8px",
+            ),
+            rx.hstack(
+                rx.button(
+                    "Save",
+                    color_scheme="green",
+                    on_click=AgentDashboardState.save_and_close,
+                    custom_attrs={"data-config-save": "true"},
+                    disabled=AgentDashboardState.config_save_disabled,
+                    font_family='"JetBrains Mono", "Courier New", monospace',
+                ),
+                rx.button(
+                    "Close",
+                    color_scheme="red",
+                    on_click=AgentDashboardState.toggle_config,
+                    custom_attrs={"data-config-close": "true"},
+                    font_family='"JetBrains Mono", "Courier New", monospace',
+                    variant="soft",
+                ),
+                rx.spacer(),
+                rx.text(
+                    "Changes update os.environ immediately for the running dashboard process where possible.",
+                    color=MUTED_TEXT,
+                    font_size="0.72rem",
+                ),
+                width="100%",
+                align="center",
+                spacing="3",
+                position="sticky",
+                bottom="0",
+                border_top=f"1px solid rgba(0, 255, 0, 0.18)",
+                background="rgba(0, 0, 0, 0.94)",
+                box_shadow="0 -10px 24px rgba(0, 0, 0, 0.42)",
+                padding="14px 0 4px",
             ),
             width="100%",
             height="100%",
-            min_height="0",
-            padding="20px 20px 240px 20px",
-            margin_left=rx.cond(DrawerState.is_open, "356px", "0"),
-            transition="margin-left 220ms ease",
-            box_sizing="border-box",
-            overflow="hidden",
-            custom_attrs={"data-workspace-shell": "true"},
+            spacing="4",
+            align="stretch",
         ),
-        bottom_command_bar(),
+        position="fixed",
+        custom_attrs={"data-config-overlay": "true"},
+        inset="0",
+        z_index="1300",
+        background="radial-gradient(circle at top right, rgba(0, 255, 255, 0.1), transparent 26%), radial-gradient(circle at left center, rgba(0, 255, 0, 0.08), transparent 22%), rgba(0, 0, 0, 0.98)",
+        padding="24px 24px 16px",
+        width="100vw",
+        height="100vh",
+        overflow="hidden",
+    )
+
+
+def index() -> rx.Component:
+    return rx.box(
+        rx.toast.provider(position="top-right", rich_colors=True, close_button=True),
+        metadata_drawer(),
+        rx.cond(
+            AgentDashboardState.show_config,
+            config_manager_overlay(),
+            rx.box(
+                top_header_bar(),
+                rx.box(
+                    rx.vstack(
+                        workspace_grid(),
+                        spacing="4",
+                        align="stretch",
+                        width="100%",
+                        height="100%",
+                        min_height="0",
+                        margin_top="5rem",
+                    ),
+                    width="100%",
+                    height="100%",
+                    min_height="0",
+                    padding="20px 20px 240px 20px",
+                    margin_left=rx.cond(DrawerState.is_open, "356px", "0"),
+                    transition="margin-left 220ms ease",
+                    box_sizing="border-box",
+                    overflow="hidden",
+                    custom_attrs={"data-workspace-shell": "true"},
+                ),
+                bottom_command_bar(),
+                width="100%",
+                height="100%",
+            ),
+        ),
+        rx.foreach(AgentDashboardState.visible_sessions, approval_modal),
         class_name="dashboard-root",
         background=BG_BLACK,
         color=TEXT_PRIMARY,

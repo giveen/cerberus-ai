@@ -29,7 +29,7 @@ dependencies = [
     "wasabi>=1.1.3",
     "prompt_toolkit>=3.0.40",
     "dotenv>=0.9.9",
-    "litellm>=1.82.0,<1.83.0",
+    "litellm>=1.83.0,<1.84.0",
     "mako>=1.3.10",
     "mcp>=1.27.0",
     "paramiko>=4.0.0, <5",
@@ -103,7 +103,7 @@ dev = [
     "sounddevice",
     "websockets",
     "types-requests>=2.0, <3",
-    "litellm>=1.82.0,<1.83.0",
+    "litellm>=1.83.0,<1.84.0",
     "prisma",
     "graphviz",
 ]
@@ -146,7 +146,7 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cerberus", "tools"]
+packages = ["src/cerberus", "src/reflex_dashboard", "tools"]
 exclude = [
     ".trunk/",
     ".git/",

@@ -123,7 +123,7 @@ def _build_parse_error_self_correction_message(
     """
     snippet_preview = raw_snippet[:300] if raw_snippet else "(unavailable)"
     return (
-        "SYSTEM WARNING: Your previous tool call had a syntax error. "
+        "Your previous tool call arguments were malformed JSON. Review your exact syntax and try again. "
         "Please retry with a valid COMMITTING_JSON block. "
         f"Review your output: [{snippet_preview}]. "
         "Use format: "
@@ -1742,12 +1742,16 @@ class RunImpl:
                 )
                 continue
 
-            try:
-                invocation_kwargs = json.loads(effective_tool_call.arguments or "{}")
-                if not isinstance(invocation_kwargs, dict):
-                    invocation_kwargs = {"_non_object_arguments": str(invocation_kwargs)}
-            except Exception:
-                invocation_kwargs = {"_raw_arguments": str(effective_tool_call.arguments or "")[:1200]}
+            raw_invocation_arguments = effective_tool_call.arguments
+            if not raw_invocation_arguments:
+                invocation_kwargs = None
+            else:
+                try:
+                    invocation_kwargs = json.loads(raw_invocation_arguments)
+                    if not isinstance(invocation_kwargs, dict):
+                        invocation_kwargs = {"_non_object_arguments": str(invocation_kwargs)}
+                except Exception:
+                    invocation_kwargs = {"_raw_arguments": str(raw_invocation_arguments)[:1200]}
 
             _RUNTIME_DEBUG_LOGGER.write(
                 channel="trace_debug",
