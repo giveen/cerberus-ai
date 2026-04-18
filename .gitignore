@@ -1,5 +1,5 @@
 assets/external/
-.states
+.states/
 .web
 *.db
 # Operating system and editors
@@ -7,6 +7,9 @@ assets/external/
 .idea/
 .vscode/
 .github/
+.devcontainer/
+.gitlab-ci.yml
+.prettierrc
 
 # Python caches and artifacts
 __pycache__/
