@@ -76,6 +76,7 @@ dockerized/volumes/*
 !dockerized/volumes/.gitkeep
 tmp_test_run/
 workspace_cli_test/
+tools/
 workspaces/*
 !workspaces/.gitkeep
 
