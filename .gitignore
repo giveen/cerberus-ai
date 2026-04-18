@@ -50,6 +50,8 @@ htmlcov/
 pytest_failures/
 .pytest_failures/
 test-results/
+test_dashboard_*.py
+tmp_parallel_tasks.txt
 
 # Runtime and generated data
 .cai/
