@@ -6,6 +6,7 @@ assets/external/
 .DS_Store
 .idea/
 .vscode/
+.github/
 
 # Python caches and artifacts
 __pycache__/
