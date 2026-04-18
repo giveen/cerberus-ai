@@ -49,8 +49,10 @@ test-results/
 
 # Runtime and generated data
 .cai/
+.cerberus/
 .web/
 .flowbaby/
+audit/
 logs/
 nohup.out
 *.log
