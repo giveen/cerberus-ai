@@ -1773,6 +1773,8 @@ class AgentDashboardState(rx.State):
                 self._store_session(index, session)
             else:
                 role = self._role_for_runtime_event(channel, session.active_tool_name)
+            if role in {"System", "Audit"} and not _is_error_log_content(message):
+                return
             if channel in {"stdout", "stderr"} and session.is_busy:
                 self._append_or_update_stream_log(index, role, message, call_id=call_id)
             else:
@@ -1824,6 +1826,8 @@ class AgentDashboardState(rx.State):
                 return
             session = self._session_copy(index)
             role = self._role_for_runtime_event(channel, session.active_tool_name)
+            if role in {"System", "Audit"} and not _is_error_log_content(text):
+                return
             session.logs = [
                 *session.logs,
                 _log_entry(role, text),
