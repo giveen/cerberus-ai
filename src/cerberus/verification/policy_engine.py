@@ -98,6 +98,19 @@ _MUTATING_COMMANDS = {
 }
 _URL_RE = re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'\"`]+")
 _NETWORK_TOKEN_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b")
+_SHELL_CONTROL_TOKENS = ("&&", "||", "|", ";", ">", "<", "$(", "`")
+_NATURAL_LANGUAGE_COMMAND_PREFIXES = {
+    "perform",
+    "please",
+    "can",
+    "could",
+    "would",
+    "should",
+    "kindly",
+    "run",
+    "execute",
+    "scan",
+}
 
 
 def is_path_contained(workspace_root: str | Path, suspicious_path: str | Path) -> bool:
@@ -439,6 +452,22 @@ class PolicyEngine:
                         level="block",
                         message=f"Tier 1: Tool '{tool_name}' is not present in the registered runtime surface.",
                         details={"tool_name": tool_name},
+                    )
+                )
+                continue
+
+            command_text = self._extract_command_like_text(call.get("arguments", {}))
+            if command_text and self._looks_like_natural_language_command(command_text):
+                findings.append(
+                    PolicyFinding(
+                        tier=1,
+                        code="natural_language_command",
+                        level="block",
+                        message=(
+                            "Tier 1: Command payload appears to be natural language, not executable shell syntax. "
+                            "Provide an explicit command such as 'nmap 192.168.0.4'."
+                        ),
+                        details={"tool_name": tool_name, "command_preview": command_text[:200]},
                     )
                 )
                 continue
@@ -985,6 +1014,38 @@ class PolicyEngine:
         if active_container:
             return True
         return shutil.which(binary_name) is not None
+
+    @staticmethod
+    def _looks_like_natural_language_command(command_text: str) -> bool:
+        text = str(command_text or "").strip()
+        if not text:
+            return False
+        if any(token in text for token in _SHELL_CONTROL_TOKENS):
+            return False
+
+        try:
+            tokens = shlex.split(text, posix=os.name != "nt")
+        except Exception:
+            tokens = text.split()
+
+        if not tokens:
+            return False
+
+        first_token = str(tokens[0]).strip()
+        if not first_token:
+            return False
+        if first_token.startswith(("./", "../", "/", "~/")):
+            return False
+
+        first_lower = first_token.lower()
+        if first_lower in _NATURAL_LANGUAGE_COMMAND_PREFIXES and len(tokens) > 1:
+            return True
+
+        # Prose-like prompts commonly include sentence punctuation and spacing.
+        if first_token[:1].isupper() and (" " in text) and any(ch in text for ch in (".", "?", "!")):
+            return True
+
+        return False
 
     @staticmethod
     def _first_command_token(command_text: str) -> str:

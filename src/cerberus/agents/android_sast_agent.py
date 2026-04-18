@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 from cerberus.agents import Agent, OpenAIChatCompletionsModel
+from cerberus.config import settings
 from cerberus.tools.all_tools import get_all_tools, get_tool
 from cerberus.tools.misc.reasoning import MODE_CRITIQUE, MODE_STRATEGY, REASONING_TOOL
 from cerberus.tools.reconnaissance.exec_code import EXEC_TOOL
@@ -219,10 +220,10 @@ class CerebroAndroidSASTAgent:
                 text = self._stream_read(file_path)
                 if not text:
                     continue
-                findings.extend(self._extract_findings(phase=phase, file_path=file_path, text=text, use_exec=use_exec))
+                findings.extend(await self._extract_findings(phase=phase, file_path=file_path, text=text, use_exec=use_exec))
             return findings
 
-    def _extract_findings(self, *, phase: AuditPhase, file_path: Path, text: str, use_exec: bool) -> List[Finding]:
+    async def _extract_findings(self, *, phase: AuditPhase, file_path: Path, text: str, use_exec: bool) -> List[Finding]:
         out: List[Finding] = []
         rel_path = str(file_path.relative_to(self.workspace_root)) if self._is_under_workspace(file_path) else str(file_path)
         for rule in self._phase_rules(phase):
@@ -236,10 +237,12 @@ class CerebroAndroidSASTAgent:
             if use_exec and phase.key == "crypto_check":
                 entropy = self._calculate_entropy(match.group(0))
                 rationale += f" Entropy={entropy:.2f}."
-            self._finding_counter += 1
+            async with self._lock:
+                self._finding_counter += 1
+                finding_id = f"CASA-{self._finding_counter:04d}"
             out.append(
                 Finding(
-                    finding_id=f"CASA-{self._finding_counter:04d}",
+                    finding_id=finding_id,
                     category=rule["category"],
                     cwe_id=rule["cwe"],
                     owasp_top10=rule["owasp"],
@@ -257,25 +260,8 @@ class CerebroAndroidSASTAgent:
         return out
 
     def _phase_rules(self, phase: AuditPhase) -> List[Dict[str, Any]]:
-        rules: Dict[str, List[Dict[str, Any]]] = {
-            "config_review": [
-                {"name": "Cleartext Allowed", "pattern": r"cleartextTrafficPermitted\s*=\s*\"?true\"?", "cwe": "CWE-319", "owasp": "M3: Insecure Communication", "impact": 8.0, "category": "Config"},
-                {"name": "Debuggable Build", "pattern": r"android:debuggable\s*=\s*\"true\"", "cwe": "CWE-489", "owasp": "M8: Security Misconfiguration", "impact": 7.0, "category": "Config"},
-            ],
-            "crypto_check": [
-                {"name": "Weak Hash", "pattern": r"MessageDigest\.getInstance\(\s*\"(?:MD5|SHA1?)\"\s*\)", "cwe": "CWE-327", "owasp": "M5: Insufficient Cryptography", "impact": 8.0, "category": "Crypto"},
-                {"name": "Hardcoded Key", "pattern": r"(?:secret|api|token|key)[a-zA-Z0-9_\-]*\s*=\s*\"[A-Za-z0-9_\-+/=]{12,}\"", "cwe": "CWE-321", "owasp": "M5: Insufficient Cryptography", "impact": 9.0, "category": "Crypto"},
-            ],
-            "data_flow": [
-                {"name": "Sensitive Logging", "pattern": r"Log\.(?:d|i|w|e)\([^\)]*(?:password|token|secret|session)", "cwe": "CWE-532", "owasp": "M2: Insecure Data Storage", "impact": 7.0, "category": "Flow"},
-                {"name": "External Storage Sensitive", "pattern": r"getExternalStorageDirectory\(\)|MODE_WORLD_READABLE", "cwe": "CWE-312", "owasp": "M2: Insecure Data Storage", "impact": 8.0, "category": "Flow"},
-            ],
-            "permission_audit": [
-                {"name": "High-Risk Permission", "pattern": r"android\.permission\.(?:READ_SMS|READ_CONTACTS|RECORD_AUDIO|READ_CALL_LOG)", "cwe": "CWE-250", "owasp": "M6: Insecure Authorization", "impact": 6.0, "category": "Permission"},
-                {"name": "Broad Storage Access", "pattern": r"android\.permission\.(?:MANAGE_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE)", "cwe": "CWE-284", "owasp": "M8: Security Misconfiguration", "impact": 6.5, "category": "Permission"},
-            ],
-        }
-        return rules.get(phase.key, [])
+        rules = settings.sast_phase_rules.get(phase.key, [])
+        return [dict(rule) for rule in rules]
 
     def _exploit_probability(self, *, path: str, snippet: str, phase: AuditPhase) -> float:
         base = 0.55

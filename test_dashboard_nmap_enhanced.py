@@ -43,37 +43,33 @@ async def test_dashboard_nmap_scan_enhanced():
         
         # Find input field
         print("Looking for input/prompt field...")
-        inputs = await page.query_selector_all("input[type='text'], textarea, [contenteditable='true']")
-        print(f"Found {len(inputs)} potential input fields")
-        
-        if inputs:
-            # Click on the first input field
-            print("Clicking on first input field...")
-            await inputs[0].click()
+        prompt_input = page.get_by_placeholder("Type a prompt for the active agent. Press Enter to send.").first
+        print("Using role/placeholder locator for prompt field")
+
+        if await prompt_input.count() > 0:
+            # Click on the input field
+            print("Clicking on prompt input field...")
+            await prompt_input.click()
             await page.wait_for_timeout(500)
             
             # Type the prompt
             prompt = "Perform a nmap scan of 192.168.0.4, and only look for the Top 1000 ports. Then summarize your findings and provide recommendations for next phase"
             print(f"Entering prompt...")
-            await inputs[0].fill(prompt)
+            await prompt_input.fill(prompt)
             await page.wait_for_timeout(500)
             
             # Take screenshot of prompt entry
             await page.screenshot(path="/tmp/dashboard_enhanced_prompt_entered.png")
             
             # Look for and click submit/run button
-            print("Looking for Run button...")
-            buttons = await page.query_selector_all("button")
-            submit_button = None
-            for btn in buttons:
-                text = await btn.text_content()
-                if text and "Run" in text:
-                    submit_button = btn
-                    break
-            
-            if submit_button:
-                print("Clicking Run button...")
-                await submit_button.click()
+            print("Looking for EXECUTE/Run button...")
+            submit_button = page.get_by_role("button", name="EXECUTE")
+            if await submit_button.count() == 0:
+                submit_button = page.get_by_role("button", name="Run")
+
+            if await submit_button.count() > 0:
+                print("Clicking EXECUTE/Run button...")
+                await submit_button.first.click()
                 await page.wait_for_timeout(2000)
             
             # Wait for execution to complete or show results
@@ -110,18 +106,14 @@ async def test_dashboard_nmap_scan_enhanced():
                 print("\n=== Page text content (last 3000 chars) ===")
                 print(text[-3000:] if len(text) > 3000 else text)
             
-            # Look for error message  
-            error_buttons = await page.query_selector_all("button")
-            for btn in error_buttons:
-                text = await btn.text_content()
-                if text and "error" in text.lower():
-                    print(f"\n=== Found error button: {text} ===")
-                    
-                    # Try to click it to reveal the error
-                    parent = await btn.evaluate("el => el.parentElement")
-                    if parent:
-                        error_text = await parent.evaluate("el => el.textContent")
-                        print(f"Error context: {error_text[:500]}")
+            # Look for error message using resilient role-based selector
+            clear_error_button = page.get_by_role("button", name="Clear Error")
+            if await clear_error_button.count() > 0:
+                print("\n=== Found error button: Clear Error ===")
+                context_locator = clear_error_button.first.locator("xpath=ancestor::*[self::div or self::section][1]")
+                error_text = await context_locator.text_content()
+                if error_text:
+                    print(f"Error context: {error_text[:500]}")
         else:
             print("No input fields found on page")
         

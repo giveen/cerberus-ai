@@ -52,11 +52,18 @@ services:
       QDRANT_URL: "http://qdrant:6333"
       CERBERUS_PRICE_LIMIT: "100"
       CEREBRO_PRICE_LIMIT: "100"
+      # Default external MCP endpoint wiring. Override in ./.env/runtime.env if needed.
+      CERBERUS_CONTAINER_MCP_URL: "${CERBERUS_CONTAINER_MCP_URL:-http://container-mcp:8000/sse}"
+      CERBERUS_PORTSWIGGER_MCP_URL: "${CERBERUS_PORTSWIGGER_MCP_URL:-}"
+      CERBERUS_AWSOME_KALI_MCP_COMMAND: "${CERBERUS_AWSOME_KALI_MCP_COMMAND:-}"
+      CERBERUS_HEXSTRIKE_MCP_COMMAND: "${CERBERUS_HEXSTRIKE_MCP_COMMAND:-}"
     volumes:
       - ./config:/config:ro
       - ./volumes/workspaces:/workspace/workspaces
       - ./volumes/logs:/workspace/logs
       - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -74,6 +81,8 @@ services:
         condition: service_started
       searxng:
         condition: service_started
+      container-mcp:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "command -v cerberus >/dev/null && test -d \"${CERBERUS_WORKSPACE_ROOT:-/workspace/workspaces}\" && kill -0 1"]
       interval: 10s
@@ -86,6 +95,66 @@ services:
       restart_policy:
         condition: on-failure
         max_attempts: 5
+
+  # Optional SSE endpoint for CERBERUS_CONTAINER_MCP_URL.
+  # Builds from source to avoid dependency on private/denied registry tags.
+  container-mcp:
+    build:
+      context: https://github.com/54rt1n/container-mcp.git#master
+      dockerfile: Containerfile
+    container_name: cerberus-container-mcp
+    profiles:
+      - runtime
+      - mcp
+    ports:
+      - "19000:8000"
+    env_file:
+      - ./.env/app.env
+    environment:
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8000"
+    volumes:
+      - ./.env:/app/config:ro
+      - ./volumes/container-mcp:/app/volume
+    healthcheck:
+      test: ["CMD-SHELL", "ls /app/config/app.env >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+    networks:
+      - cerberus-bridge
+    restart: unless-stopped
+
+  # Optional helper to run HexStrike server in compose.
+  # CERBERUS_HEXSTRIKE_MCP_COMMAND still needs to point to a working stdio bridge command.
+  hexstrike-server:
+    image: python:3.12-slim
+    container_name: cerberus-hexstrike-server
+    profiles:
+      - runtime
+      - mcp
+    command:
+      - sh
+      - -lc
+      - |
+        set -e
+        apt-get update
+        apt-get install -y --no-install-recommends git
+        rm -rf /var/lib/apt/lists/*
+        if [ ! -f /opt/hexstrike-ai/hexstrike_server.py ]; then
+          rm -rf /opt/hexstrike-ai
+          git clone --depth 1 https://github.com/0x4m4/hexstrike-ai.git /opt/hexstrike-ai
+        fi
+        pip install --no-cache-dir -r /opt/hexstrike-ai/requirements.txt
+        python3 /opt/hexstrike-ai/hexstrike_server.py --port 8888
+    volumes:
+      - ./volumes/hexstrike:/opt/hexstrike-ai
+    ports:
+      - "18888:8888"
+    networks:
+      - cerberus-bridge
+    restart: unless-stopped
 
   redis:
     image: redis:alpine

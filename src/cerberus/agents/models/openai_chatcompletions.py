@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 import uuid
 import litellm
+from pydantic import BaseModel as PydanticBaseModel, ConfigDict, Field, ValidationError as PydanticValidationError
 try:
     import tiktoken
 except Exception:  # pragma: no cover - optional dependency
@@ -93,6 +94,7 @@ from openai.types.responses.response_input_param import FunctionCallOutput, Item
 from openai.types.responses.response_usage import OutputTokensDetails
 from wasabi.util import color
 
+from cerberus.config import settings
 from cerberus.internal.debug_logger import get_debug_logger
 from cerberus.agents.simple_agent_manager import SimpleAgentManager, AGENT_MANAGER
 from cerberus.agents.parallel_isolation import PARALLEL_ISOLATION
@@ -155,7 +157,7 @@ _PREFLIGHT_REACHABILITY_CACHE: dict[str, tuple[float, bool, str]] = {}
 _PREFLIGHT_ALERTED_UNREACHABLE: set[str] = set()
 _PREFLIGHT_BACKGROUND_TASKS: dict[str, asyncio.Task[None]] = {}
 _RUNTIME_DEBUG_LOGGER = get_debug_logger()
-MAX_CONTEXT_TOKENS = int(os.getenv("CERBERUS_MAX_CONTEXT_TOKENS", "6000") or "6000")
+MAX_CONTEXT_TOKENS = int(settings.max_token_window)
 MAX_TOOL_OUTPUT_CHARS = int(os.getenv("CERBERUS_MAX_TOOL_OUTPUT_CHARS", "2000") or "2000")
 _KEEP_RECENT_CONTEXT_MESSAGES = max(
     2,
@@ -250,7 +252,7 @@ def _messages_debug_view(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
 _disable_external_trace_export_env()
 
 
-def _coerce_tool_args_dict(tool_args: Any) -> dict[str, Any]:
+def _coerce_tool_args_dict(tool_args: Any) -> dict[str, Any] | None:
     if isinstance(tool_args, dict):
         return tool_args
     if isinstance(tool_args, str):
@@ -259,8 +261,83 @@ def _coerce_tool_args_dict(tool_args: Any) -> dict[str, Any]:
             if isinstance(parsed, dict):
                 return parsed
         except Exception:
-            return {"_raw": tool_args}
-    return {}
+            return None
+    return None
+
+
+class ToolArgumentContractFailure(PydanticBaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    tool_name: str = ""
+    call_id: str = ""
+    failure: Literal["malformed_json", "schema_validation_failed"]
+    reason: str = ""
+    raw_preview: str = Field(default="", max_length=800)
+    validation_errors: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ToolArgumentContractError(ValueError):
+    def __init__(self, failure: ToolArgumentContractFailure):
+        self.failure = failure
+        message = f"tool_arguments_{failure.failure}: {failure.reason or failure.tool_name or 'unknown_tool'}"
+        super().__init__(message)
+
+
+def _validate_tool_arguments_with_pydantic(
+    payload: dict[str, Any],
+    *,
+    tool_name: str,
+    call_id: str = "",
+    raw_preview: str = "",
+) -> dict[str, Any]:
+    if not tool_name:
+        return payload
+
+    try:
+        from cerberus.tools.all_tools import get_tool_registry
+
+        tool = get_tool_registry().get_tool_by_name(tool_name)
+        params_model = getattr(tool, "params_pydantic_model", None)
+        if params_model is None or not hasattr(params_model, "model_validate"):
+            return payload
+
+        validated = params_model.model_validate(payload, strict=True)
+        if hasattr(validated, "model_dump"):
+            normalized = validated.model_dump(mode="python", exclude_none=False)
+            return normalized if isinstance(normalized, dict) else payload
+        return payload
+    except PydanticValidationError as exc:
+        failure = ToolArgumentContractFailure(
+            tool_name=tool_name,
+            call_id=call_id,
+            failure="schema_validation_failed",
+            reason="failed_strict_pydantic_validation",
+            raw_preview=(raw_preview or str(payload))[:800],
+            validation_errors=[
+                {
+                    "loc": [str(part) for part in err.get("loc", ())],
+                    "msg": str(err.get("msg", "")),
+                    "type": str(err.get("type", "")),
+                }
+                for err in exc.errors(include_url=False)
+            ],
+        )
+        _RUNTIME_DEBUG_LOGGER.write(
+            channel="trace_debug",
+            message="tool_arguments_schema_validation_failed",
+            payload=failure.model_dump(),
+        )
+        logger.debug(
+            "Strict tool argument validation failed for %s (call_id=%s)",
+            tool_name or "unknown_tool",
+            call_id or "n/a",
+        )
+        raise ToolArgumentContractError(failure) from exc
+    except ToolArgumentContractError:
+        raise
+    except Exception:
+        # Preserve compatibility if tool registry lookups are unavailable.
+        return payload
 
 
 def _distill_nmap_output(raw: str) -> str:
@@ -330,7 +407,7 @@ def distill_tool_output_for_context(*, tool_name: str, tool_args: Any, output: A
         return raw
 
     name = str(tool_name or "").strip().lower()
-    args_dict = _coerce_tool_args_dict(tool_args)
+    args_dict = _coerce_tool_args_dict(tool_args) or {}
     command_text = str(args_dict.get("command", "") or "").strip().lower()
 
     is_nmap = "nmap" in name or command_text.startswith("nmap") or " nmap " in f" {command_text} "
@@ -613,7 +690,24 @@ def _parse_tool_args(raw: str | None, tool_name: str = "") -> dict[str, Any] | N
         return None
 
 
-def _coerce_tool_arguments_for_api(raw: Any, tool_name: str = "") -> str:
+def _malformed_arguments_payload(raw: Any) -> str:
+    snippet = ""
+    if isinstance(raw, str):
+        snippet = raw[:4000]
+    elif raw is not None:
+        snippet = str(raw)[:4000]
+    return json.dumps(
+        {
+            "_raw_arguments": snippet,
+            "original_arguments": snippet,
+            "_parse_error": "tool_arguments_malformed_json",
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+
+
+def _coerce_tool_arguments_for_api(raw: Any, tool_name: str = "", call_id: str = "") -> str | None:
     """Return provider-safe function.arguments JSON.
 
     Chat-completions providers expect function.arguments to be a valid JSON
@@ -678,7 +772,24 @@ def _coerce_tool_arguments_for_api(raw: Any, tool_name: str = "") -> str:
 
     if isinstance(raw, dict):
         normalized = _normalize_typed_empty_values(raw, tool_name)
-        return json.dumps(normalized, ensure_ascii=True, separators=(",", ":"))
+        try:
+            validated = _validate_tool_arguments_with_pydantic(
+                normalized,
+                tool_name=tool_name,
+                call_id=call_id,
+                raw_preview=str(raw)[:800],
+            )
+            return json.dumps(validated, ensure_ascii=True, separators=(",", ":"))
+        except ToolArgumentContractError as exc:
+            return json.dumps(
+                {
+                    "_raw_arguments": exc.failure.raw_preview,
+                    "original_arguments": exc.failure.raw_preview,
+                    "_parse_error": f"tool_arguments_{exc.failure.failure}",
+                },
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
 
     candidate = ""
     if isinstance(raw, str):
@@ -689,7 +800,24 @@ def _coerce_tool_arguments_for_api(raw: Any, tool_name: str = "") -> str:
     parsed = _parse_tool_args(candidate, tool_name=tool_name) if candidate else None
     if isinstance(parsed, dict):
         normalized = _normalize_typed_empty_values(parsed, tool_name)
-        return json.dumps(normalized, ensure_ascii=True, separators=(",", ":"))
+        try:
+            validated = _validate_tool_arguments_with_pydantic(
+                normalized,
+                tool_name=tool_name,
+                call_id=call_id,
+                raw_preview=candidate[:800],
+            )
+            return json.dumps(validated, ensure_ascii=True, separators=(",", ":"))
+        except ToolArgumentContractError as exc:
+            return json.dumps(
+                {
+                    "_raw_arguments": exc.failure.raw_preview,
+                    "original_arguments": exc.failure.raw_preview,
+                    "_parse_error": f"tool_arguments_{exc.failure.failure}",
+                },
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
 
     # Preserve plain streamed fragments (e.g. "arg1arg2") as-is. Wrapping
     # these breaks incremental tool-call assembly semantics.
@@ -702,13 +830,15 @@ def _coerce_tool_arguments_for_api(raw: Any, tool_name: str = "") -> str:
     if candidate:
         wrapped = {
             "_raw_arguments": candidate[:4000],
-            "_parse_error": "failed_to_parse_tool_arguments",
+            "original_arguments": candidate[:4000],
+            "_parse_error": "tool_arguments_malformed_json",
         }
         _RUNTIME_DEBUG_LOGGER.write(
             channel="trace_debug",
             message="tool_arguments_wrapped_after_parse_failure",
             payload={
                 "tool_name": tool_name or "unknown_tool",
+                "call_id": call_id or "",
                 "preview": candidate[:200],
             },
         )
@@ -716,13 +846,14 @@ def _coerce_tool_arguments_for_api(raw: Any, tool_name: str = "") -> str:
 
     _RUNTIME_DEBUG_LOGGER.write(
         channel="trace_debug",
-        message="tool_arguments_coerced_empty_object",
+        message="tool_arguments_coerced_none",
         payload={
             "tool_name": tool_name or "unknown_tool",
+            "call_id": call_id or "",
             "preview": (candidate[:200] if candidate else ""),
         },
     )
-    return "{}"
+    return None
 
 
 def _is_tool_arguments_parse_error(exc: Exception) -> bool:
@@ -732,6 +863,7 @@ def _is_tool_arguments_parse_error(exc: Exception) -> bool:
         or "failed to parse tool call arguments" in message
         or "json.exception.parse_error" in message
         or ("tool call arguments" in message and "parse" in message)
+        or "tool_arguments_malformed_json" in message
         or (isinstance(exc, json.JSONDecodeError))
     )
 
@@ -2051,12 +2183,12 @@ class OpenAIChatCompletionsModel(Model):
 
                     if not tool_msg_exists:
                         tool_name = "unknown_tool"
-                        tool_args: Any = {}
+                        tool_args: Any = None
                         if hasattr(self._converter, "recent_tool_calls") and call_id in self._converter.recent_tool_calls:
-                            details = self._converter.recent_tool_calls.get(call_id, {})
+                            details = self._converter.recent_tool_calls.get(call_id)
                             if isinstance(details, dict):
                                 tool_name = str(details.get("name", "unknown_tool"))
-                                tool_args = details.get("arguments", {})
+                                tool_args = details.get("arguments")
 
                         # Añadir el mensaje tool al message_history
                         tool_msg = {
@@ -2636,7 +2768,10 @@ class OpenAIChatCompletionsModel(Model):
                                     recovered_args = _coerce_tool_arguments_for_api(
                                         recovered_tool_arguments,
                                         tool_name=recovered_tool_name,
+                                        call_id="",
                                     )
+                                    if recovered_args is None:
+                                        recovered_args = _malformed_arguments_payload(recovered_tool_arguments)
                                     synthetic_call_id = (
                                         "call_"
                                         + hashlib.md5(
@@ -2913,7 +3048,10 @@ class OpenAIChatCompletionsModel(Model):
                                 tool_args = _coerce_tool_arguments_for_api(
                                     state.function_calls[tc_index].arguments,
                                     tool_name=state.function_calls[tc_index].name,
+                                    call_id=state.function_calls[tc_index].call_id,
                                 )
+                                if tool_args is None:
+                                    continue
 
                                 tool_call_msg = {
                                     "role": "assistant",
@@ -2993,7 +3131,10 @@ class OpenAIChatCompletionsModel(Model):
                         coerced_args = _coerce_tool_arguments_for_api(
                             recovered_tool_arguments,
                             tool_name=recovered_tool_name,
+                            call_id="",
                         )
+                        if coerced_args is None:
+                            coerced_args = _malformed_arguments_payload(recovered_tool_arguments)
 
                         synthetic_call_id = (
                             f"call_{hashlib.md5((recovered_tool_name + str(time.time())).encode()).hexdigest()[:12]}"
@@ -3236,10 +3377,14 @@ class OpenAIChatCompletionsModel(Model):
 
                 # Actually send events for the function calls
                 for function_call in state.function_calls.values():
-                    function_call.arguments = _coerce_tool_arguments_for_api(
+                    coerced_arguments = _coerce_tool_arguments_for_api(
                         function_call.arguments,
                         tool_name=function_call.name,
+                        call_id=function_call.call_id,
                     )
+                    if coerced_arguments is None:
+                        coerced_arguments = _malformed_arguments_payload(function_call.arguments)
+                    function_call.arguments = coerced_arguments
 
                     # Print a single clean tool execution line only after args are finalized.
                     final_tool_args = _sanitize_llm_tool_args(function_call.arguments)
@@ -5684,7 +5829,12 @@ class _Converter:
                     function_payload["arguments"] = _coerce_tool_arguments_for_api(
                         function_details.get("arguments") if isinstance(function_details, dict) else None,
                         tool_name=function_payload["name"],
+                        call_id=str(tc.get("id", "") or ""),
                     )
+                    if function_payload["arguments"] is None:
+                        function_payload["arguments"] = _malformed_arguments_payload(
+                            function_details.get("arguments") if isinstance(function_details, dict) else None
+                        )
 
                     tool_calls_param.append(
                         {
@@ -5834,9 +5984,13 @@ class _Converter:
                 function_payload: dict[str, Any] = {
                     "name": func_call["name"],
                     "arguments": _coerce_tool_arguments_for_api(
-                        func_call.get("arguments"), tool_name=func_call["name"]
+                        func_call.get("arguments"),
+                        tool_name=func_call["name"],
+                        call_id=str(func_call.get("call_id", "") or ""),
                     ),
                 }
+                if function_payload["arguments"] is None:
+                    function_payload["arguments"] = _malformed_arguments_payload(func_call.get("arguments"))
 
                 new_tool_call: dict[str, Any] = {
                     "id": func_call["call_id"][:40],

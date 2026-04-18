@@ -206,6 +206,41 @@ class RedisClientManager:
             logger.error(f"Failed to clear history for {client_token}: {e}")
             return False
 
+    async def save_client_config(
+        self,
+        client_token: str,
+        config_payload: dict[str, Any],
+    ) -> bool:
+        """Persist per-client dashboard configuration as JSON.
+
+        Stored under key format: cerberus:config:<client_token>
+        """
+        key = f"cerberus:config:{client_token}"
+        try:
+            encoded = json.dumps(config_payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+            await self.client.set(key, encoded)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save config for {client_token}: {e}")
+            return False
+
+    async def load_client_config(self, client_token: str) -> dict[str, Any] | None:
+        """Load per-client dashboard configuration JSON from Redis."""
+        key = f"cerberus:config:{client_token}"
+        try:
+            raw = await self.client.get(key)
+            if not raw:
+                return None
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", errors="replace")
+            parsed = json.loads(str(raw))
+            if isinstance(parsed, dict):
+                return parsed
+            return None
+        except Exception as e:
+            logger.error(f"Failed to load config for {client_token}: {e}")
+            return None
+
     @asynccontextmanager
     async def subscribe(
         self,

@@ -198,6 +198,14 @@ class CerebroAgentFactory:
         "generic": "generic_intelligence",
     }
 
+    # Built-in tool names that are superseded by an MCP server when connected.
+    # Key = built-in tool name; Value = MCP server alias that replaces it.
+    _MCP_TOOL_SHADOWS: Mapping[str, str] = {
+        "nmap": "nmap-mcp",
+        "capture_remote_traffic": "wiremcp",
+        "remote_capture_session": "wiremcp",
+    }
+
     def __init__(
         self,
         *,
@@ -709,23 +717,32 @@ class CerebroAgentFactory:
                 )
         return generic_agent
 
-    def _inject_mcp_tools(self, runtime_agent: Agent, role: str) -> None:
+    def _inject_mcp_tools(self, runtime_agent: Agent, role: str) -> None:  # noqa: ARG002
         try:
             mcp_module = importlib.import_module("cerberus.repl.commands.mcp")
-            get_mcp_tools_for_agent = getattr(mcp_module, "get_mcp_tools_for_agent", None)
-            if not callable(get_mcp_tools_for_agent):
+            get_mcp_manager_fn = getattr(mcp_module, "get_mcp_manager", None)
+            if not callable(get_mcp_manager_fn):
                 return
-            mcp_tools = get_mcp_tools_for_agent(role)
-            if not isinstance(mcp_tools, (list, tuple)):
-                return
+
+            # bootstrap=True ensures managed servers connect if not already running.
+            active_manager = get_mcp_manager_fn(bootstrap=True)
+            mcp_tools = list(active_manager.tool_registry.values())
             if not mcp_tools:
                 return
 
+            # Determine which built-in tools are superseded by a connected MCP server.
+            connected_aliases: set[str] = set(active_manager.connections.keys())
+            shadowed_builtins: set[str] = {
+                builtin_name
+                for builtin_name, mcp_alias in self._MCP_TOOL_SHADOWS.items()
+                if mcp_alias in connected_aliases
+            }
+
             existing = list(getattr(runtime_agent, "tools", []) or [])
-            existing_by_name = {
+            existing_by_name: Dict[str, Any] = {
                 self._tool_name(tool): tool
                 for tool in existing
-                if self._tool_name(tool)
+                if self._tool_name(tool) and self._tool_name(tool) not in shadowed_builtins
             }
             for mcp_tool in mcp_tools:
                 tool_name = self._tool_name(mcp_tool)

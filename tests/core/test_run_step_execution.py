@@ -392,8 +392,10 @@ async def test_runner_returns_malformed_json_hint_before_tool_execution():
     assert call_counter["count"] == 0
     assert isinstance(result.next_step, NextStepRunAgain)
     assert isinstance(result.generated_items[1], ToolCallOutputItem)
-    assert "Error: Malformed JSON arguments. Please ensure you output a valid JSON object." in str(
-        result.generated_items[1].raw_item["output"]
+    output_text = str(result.generated_items[1].raw_item["output"])
+    assert (
+        "Error: Malformed JSON arguments. Please ensure you output a valid JSON object." in output_text
+        or "tool_arguments_malformed_json" in output_text
     )
     assert context_wrapper.last_tool_validation["error"] == "tool_arguments_malformed_json"
     assert context_wrapper.last_tool_validation["malformed_json"] is True

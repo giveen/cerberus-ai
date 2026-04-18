@@ -11,6 +11,8 @@ from cerberus.repl.commands.mcp import (
     add_mcp_server_to_agent,
     get_mcp_servers_for_agent,
     get_mcp_tools_for_agent,
+    remove_mcp_server_from_all_agents,
+    reset_mcp_bootstrap_state,
 )
 from cerberus.agents import Agent
 from cerberus.agents.tool import FunctionTool
@@ -24,12 +26,14 @@ class TestMCPPersistence:
         # Clear global state
         _GLOBAL_MCP_SERVERS.clear()
         _AGENT_MCP_ASSOCIATIONS.clear()
+        reset_mcp_bootstrap_state()
 
     def teardown_method(self):
         """Clean up after tests."""
         # Clear global state
         _GLOBAL_MCP_SERVERS.clear()
         _AGENT_MCP_ASSOCIATIONS.clear()
+        reset_mcp_bootstrap_state()
 
     def test_mcp_association_persistence(self):
         """Test that MCP associations are persisted."""
@@ -152,3 +156,14 @@ class TestMCPPersistence:
         assert len(tools1) == 1
         assert len(tools2) == 1
         assert tools1[0].name == tools2[0].name == "shared_tool"
+
+    def test_remove_mcp_server_from_all_agents(self):
+        """Test that disconnect-style cleanup removes a server from every agent association."""
+        add_mcp_server_to_agent("agent1", "server1")
+        add_mcp_server_to_agent("agent1", "server2")
+        add_mcp_server_to_agent("agent2", "server1")
+
+        remove_mcp_server_from_all_agents("server1")
+
+        assert get_mcp_servers_for_agent("agent1") == ["server2"]
+        assert get_mcp_servers_for_agent("agent2") == []

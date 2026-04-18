@@ -55,7 +55,7 @@ from .tracing.span_data import AgentSpanData
 from .usage import Usage
 from .util import _error_tracing
 from cerberus.util import safe_duration_to_float
-from cerberus.verification.policy_engine import (
+from cerberus.core.policy_engine import (
     PolicyEngine,
     PolicyReport,
     format_logic_audit_report,

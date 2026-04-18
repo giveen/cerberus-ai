@@ -122,6 +122,43 @@ def test_verify_skips_local_binary_check_when_active_container_is_configured(mon
     assert not any(f.code == "missing_dependency" for f in report.findings)
 
 
+def test_verify_blocks_natural_language_command_payload(tmp_path):
+    engine = PolicyEngine(workspace_dir=str(tmp_path), project_id="eng-1")
+
+    report = engine.verify(
+        {
+            "tool_name": "execute_cli_command",
+            "arguments": {
+                "command": "Perform a nmap scan of 192.168.0.4 and report back the results. Do not use -p- as an option"
+            },
+            "available_tools": ["execute_cli_command"],
+        }
+    )
+
+    assert report.blocked is True
+    assert any(f.code == "natural_language_command" for f in report.findings)
+
+
+def test_verify_blocks_natural_language_command_even_with_active_container(monkeypatch, tmp_path):
+    engine = PolicyEngine(workspace_dir=str(tmp_path), project_id="eng-1")
+
+    monkeypatch.setenv("CEREBRO_ACTIVE_CONTAINER", "cerberus")
+    monkeypatch.setattr("cerberus.verification.policy_engine.shutil.which", lambda _name: None)
+
+    report = engine.verify(
+        {
+            "tool_name": "execute_cli_command",
+            "arguments": {
+                "command": "Please scan 192.168.0.4 and summarize the output"
+            },
+            "available_tools": ["execute_cli_command"],
+        }
+    )
+
+    assert report.blocked is True
+    assert any(f.code == "natural_language_command" for f in report.findings)
+
+
 def test_post_audit_ignores_malformed_raw_args_for_generic_tool(tmp_path):
     engine = PolicyEngine(workspace_dir=str(tmp_path), project_id="eng-1")
 

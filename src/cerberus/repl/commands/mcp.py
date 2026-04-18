@@ -18,6 +18,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import threading
 from typing import Any, Awaitable, Dict, List, Mapping, MutableMapping, Optional, Sequence, Set, Tuple, cast
 
 from rich import box
@@ -26,7 +27,9 @@ from rich.panel import Panel
 from rich.table import Table
 
 from cerberus.agents import get_available_agents
+from cerberus.config import get_settings
 from cerberus.memory import MemoryManager
+from cerberus.mcp_bootstrap import ManagedMCPServerSettings, prepare_managed_mcp_server, resolve_managed_mcp_endpoint, resolve_mcp_bootstrap_root
 from cerberus.repl.commands.base import FrameworkCommand, register_command
 from cerberus.agents.tool import FunctionTool
 from cerberus.tools.workspace import get_project_space
@@ -197,7 +200,14 @@ class MCPManager:
     def tool_registry(self) -> Mapping[str, FunctionTool]:
         return self._tool_registry
 
-    async def connect(self, *, alias: str, endpoint: str, headers: Optional[Mapping[str, str]] = None) -> MCPConnection:
+    async def connect(
+        self,
+        *,
+        alias: str,
+        endpoint: str,
+        headers: Optional[Mapping[str, str]] = None,
+        associate_agents: Optional[Sequence[str]] = None,
+    ) -> MCPConnection:
         if alias in self._connections:
             raise ValueError(f"Alias '{alias}' is already connected")
 
@@ -226,7 +236,8 @@ class MCPManager:
         _GLOBAL_MCP_SERVERS[alias] = server
 
         self._register_connection_tools(conn)
-        self._auto_attach_tools_to_agents(conn)
+        self._auto_attach_tools_to_agents(conn, associate_agents=associate_agents)
+        associate_mcp_server_with_agents(alias, associate_agents)
 
         self._audit("connect", {"alias": alias, "transport": transport, "endpoint": endpoint, "tools": len(tools)})
         return conn
@@ -246,7 +257,9 @@ class MCPManager:
         for name in to_drop:
             self._tool_registry.pop(name, None)
 
-        for agent in get_available_agents().values():
+        remove_mcp_server_from_all_agents(alias)
+
+        for agent in _safe_get_available_agents().values():
             tools = getattr(agent, "tools", None)
             if not isinstance(tools, list):
                 continue
@@ -262,7 +275,7 @@ class MCPManager:
         conn.tools = self._normalize_tools(alias=alias, raw_tools=tools_raw)
         conn.resources = self._normalize_resources(alias=alias, raw_resources=resources_raw)
         self._register_connection_tools(conn)
-        self._auto_attach_tools_to_agents(conn)
+        self._auto_attach_tools_to_agents(conn, associate_agents=get_agents_for_mcp_server(alias) or None)
         return conn.tools, conn.resources
 
     async def inject_resource_context(
@@ -451,12 +464,17 @@ class MCPManager:
             fq_name = f"mcp::{conn.alias}::{tool_meta.name}"
             self._tool_registry[fq_name] = self._build_function_tool(conn.alias, tool_meta)
 
-    def _auto_attach_tools_to_agents(self, conn: MCPConnection) -> None:
+    def _auto_attach_tools_to_agents(
+        self,
+        conn: MCPConnection,
+        *,
+        associate_agents: Optional[Sequence[str]] = None,
+    ) -> None:
         mcp_tools = [self._tool_registry[f"mcp::{conn.alias}::{tool.name}"] for tool in conn.tools]
         if not mcp_tools:
             return
 
-        for agent in get_available_agents().values():
+        for agent in _iter_current_target_agents(associate_agents).values():
             existing = getattr(agent, "tools", None)
             if not isinstance(existing, list):
                 continue
@@ -524,14 +542,19 @@ class MCPManager:
 
 
 _GLOBAL_MCP_MANAGER: Optional[MCPManager] = None
+_MCP_AUTOLOAD_LOCK = threading.RLock()
+_MCP_AUTOLOAD_ATTEMPTED = False
+_MCP_AUTOLOAD_STATUS: List[Dict[str, Any]] = []
 
 
-def get_mcp_manager(memory: Optional[MemoryManager] = None) -> MCPManager:
+def get_mcp_manager(memory: Optional[MemoryManager] = None, *, bootstrap: bool = True) -> MCPManager:
     global _GLOBAL_MCP_MANAGER
     if _GLOBAL_MCP_MANAGER is None:
         mem = memory or MemoryManager()
         workspace_root = get_project_space().ensure_initialized().resolve()
         _GLOBAL_MCP_MANAGER = MCPManager(memory=mem, workspace_root=workspace_root)
+    if bootstrap:
+        ensure_configured_mcp_servers(manager=_GLOBAL_MCP_MANAGER)
     return _GLOBAL_MCP_MANAGER
 
 
@@ -557,6 +580,18 @@ def get_mcp_servers_for_agent(agent_name: str) -> List[str]:
     return list(_AGENT_MCP_ASSOCIATIONS.get(agent_name.lower(), []))
 
 
+def get_agents_for_mcp_server(server_name: str) -> List[str]:
+    return sorted(agent_name for agent_name, servers in _AGENT_MCP_ASSOCIATIONS.items() if server_name in servers)
+
+
+def _safe_get_available_agents() -> Dict[str, Any]:
+    try:
+        return get_available_agents()
+    except Exception as exc:
+        _log.warning("Unable to enumerate available agents for MCP association: %s", exc)
+        return {}
+
+
 def add_mcp_server_to_agent(agent_name: str, server_name: str) -> None:
     agent_name_lower = agent_name.lower()
     if agent_name_lower not in _AGENT_MCP_ASSOCIATIONS:
@@ -571,6 +606,122 @@ def remove_mcp_server_from_agent(agent_name: str, server_name: str) -> None:
         return
     if server_name in _AGENT_MCP_ASSOCIATIONS[agent_name_lower]:
         _AGENT_MCP_ASSOCIATIONS[agent_name_lower].remove(server_name)
+    if not _AGENT_MCP_ASSOCIATIONS[agent_name_lower]:
+        _AGENT_MCP_ASSOCIATIONS.pop(agent_name_lower, None)
+
+
+def remove_mcp_server_from_all_agents(server_name: str) -> None:
+    for agent_name in list(_AGENT_MCP_ASSOCIATIONS.keys()):
+        remove_mcp_server_from_agent(agent_name, server_name)
+
+
+def associate_mcp_server_with_agents(server_name: str, agent_names: Optional[Sequence[str]] = None) -> List[str]:
+    targets = _normalize_association_targets(agent_names)
+    for agent_name in targets:
+        add_mcp_server_to_agent(agent_name, server_name)
+    return targets
+
+
+def reset_mcp_bootstrap_state() -> None:
+    global _MCP_AUTOLOAD_ATTEMPTED, _MCP_AUTOLOAD_STATUS
+    with _MCP_AUTOLOAD_LOCK:
+        _MCP_AUTOLOAD_ATTEMPTED = False
+        _MCP_AUTOLOAD_STATUS = []
+
+
+def ensure_configured_mcp_servers(
+    manager: Optional[MCPManager] = None,
+    *,
+    force: bool = False,
+) -> List[Dict[str, Any]]:
+    global _MCP_AUTOLOAD_ATTEMPTED, _MCP_AUTOLOAD_STATUS
+
+    settings = get_settings()
+    if not settings.mcp_autoload_enabled and not force:
+        return []
+
+    with _MCP_AUTOLOAD_LOCK:
+        if _MCP_AUTOLOAD_ATTEMPTED and not force:
+            return list(_MCP_AUTOLOAD_STATUS)
+
+        active_manager = manager or get_mcp_manager(bootstrap=False)
+        _MCP_AUTOLOAD_STATUS = _run_awaitable_sync(
+            _bootstrap_configured_mcp_servers(active_manager, settings.mcp_managed_servers, settings.mcp_bootstrap_root)
+        )
+        _MCP_AUTOLOAD_ATTEMPTED = True
+        return list(_MCP_AUTOLOAD_STATUS)
+
+
+async def _bootstrap_configured_mcp_servers(
+    manager: MCPManager,
+    server_specs: Sequence[ManagedMCPServerSettings],
+    bootstrap_root: str,
+) -> List[Dict[str, Any]]:
+    results: List[Dict[str, Any]] = []
+    resolved_root = resolve_mcp_bootstrap_root(bootstrap_root)
+
+    for spec in server_specs:
+        if not spec.enabled:
+            continue
+
+        result: Dict[str, Any] = {
+            "alias": spec.alias,
+            "transport": spec.transport,
+            "management_mode": spec.management_mode,
+        }
+        try:
+            missing_env = [key for key in spec.required_env if not os.getenv(key, "").strip()]
+            if missing_env:
+                result["status"] = "skipped"
+                result["reason"] = f"missing_required_env:{','.join(missing_env)}"
+                results.append(result)
+                continue
+
+            # For external servers, skip cleanly when no endpoint/command is configured yet.
+            if spec.management_mode == "external":
+                endpoint_candidate = (spec.endpoint or "").strip()
+                if not endpoint_candidate and spec.endpoint_env:
+                    endpoint_candidate = os.getenv(spec.endpoint_env, "").strip()
+                if not endpoint_candidate:
+                    result["status"] = "skipped"
+                    result["reason"] = "missing_endpoint"
+                    results.append(result)
+                    continue
+
+            if spec.management_mode == "managed":
+                result.update(await asyncio.to_thread(prepare_managed_mcp_server, spec, resolved_root))
+
+            endpoint = await asyncio.to_thread(resolve_managed_mcp_endpoint, spec, resolved_root)
+            if spec.alias in manager.connections:
+                associate_mcp_server_with_agents(spec.alias, spec.agents)
+                result["status"] = "already_connected"
+            else:
+                await manager.connect(alias=spec.alias, endpoint=endpoint, associate_agents=spec.agents)
+                result["status"] = "connected"
+            result["agents"] = associate_mcp_server_with_agents(spec.alias, spec.agents)
+        except Exception as exc:
+            result["status"] = "error"
+            result["error"] = str(exc)
+            _log.warning("Configured MCP bootstrap failed for '%s': %s", spec.alias, exc)
+        results.append(result)
+
+    return results
+
+
+def _normalize_association_targets(agent_names: Optional[Sequence[str]] = None) -> List[str]:
+    if not agent_names or any(name.strip() == "*" for name in agent_names if isinstance(name, str)):
+        return sorted(name.lower() for name in _safe_get_available_agents().keys())
+
+    return sorted({name.strip().lower() for name in agent_names if isinstance(name, str) and name.strip()})
+
+
+def _iter_current_target_agents(agent_names: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+    available_agents = _safe_get_available_agents()
+    if not agent_names or any(name.strip() == "*" for name in agent_names if isinstance(name, str)):
+        return {name.lower(): agent for name, agent in available_agents.items()}
+
+    normalized_targets = {name.strip().lower() for name in agent_names if isinstance(name, str) and name.strip()}
+    return {name.lower(): agent for name, agent in available_agents.items() if name.lower() in normalized_targets}
 
 
 def _make_legacy_tool(server_name: str, tool: Any) -> FunctionTool:
@@ -614,6 +765,11 @@ def _make_legacy_tool(server_name: str, tool: Any) -> FunctionTool:
 
 
 def get_mcp_tools_for_agent(agent_name: str) -> List[FunctionTool]:
+    try:
+        ensure_configured_mcp_servers()
+    except Exception as exc:
+        _log.warning("Configured MCP bootstrap failed while resolving tools for '%s': %s", agent_name, exc)
+
     tools: List[FunctionTool] = []
     for server_name in get_mcp_servers_for_agent(agent_name):
         server = _GLOBAL_MCP_SERVERS.get(server_name)

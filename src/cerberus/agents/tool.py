@@ -13,6 +13,7 @@ from openai.types.responses.web_search_tool_param import UserLocation
 from pydantic import ValidationError
 from typing_extensions import Concatenate, ParamSpec
 
+from cerberus.config import settings
 from cerberus.parsers import parse_json_lenient
 
 from . import _debug
@@ -600,7 +601,7 @@ def function_tool(
             params_pydantic_model=schema.params_pydantic_model,
             on_invoke_tool=_on_invoke_tool,
             strict_json_schema=strict_mode,
-            risk_tier=max(1, min(int(risk_tier), 4)),
+            risk_tier=max(int(settings.risk_tier_min), min(int(risk_tier), int(settings.risk_tier_max))),
         )
 
     # If func is actually a callable, we were used as @function_tool with no parentheses

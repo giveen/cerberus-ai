@@ -64,7 +64,7 @@ from cerberus.util.config import (
     get_effective_api_key,
     get_effective_model,
 )
-from cerberus.verification.policy_engine import PolicyEngine
+from cerberus.core.policy_engine import PolicyEngine
 
 
 _MIN_RAM_GB = 240.0
@@ -85,6 +85,8 @@ _PROMPT_DISPATCH_MAX_RETRIES = 3
 _RETRYABLE_PROMPT_ERROR_PATTERNS = [
     "failed to parse tool call arguments as json",
     "tool_arguments_missing_required_fields",
+    "tool_arguments_malformed_json",
+    "failed_to_parse_tool_arguments",
     "critical parse error",
 ]
 

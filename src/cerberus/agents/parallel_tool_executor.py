@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 import weakref
 import logging
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .tool import FunctionTool
 from .items import ToolCallOutputItem, ItemHelpers
@@ -33,7 +34,8 @@ class PendingToolCall:
     tool_name: str
     tool_function: Callable
     arguments: Dict[str, Any]
-    raw_arguments: str = "{}"
+    raw_arguments: str
+    original_arguments: str
     agent_name: str
     context_wrapper: RunContextWrapper
     submitted_at: float = field(default_factory=time.time)
@@ -41,6 +43,25 @@ class PendingToolCall:
     error: Optional[Exception] = None
     completed: bool = False
     completion_event: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+class SubmittedToolCallPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    tool_name: str
+    arguments: dict[str, Any]
+    raw_arguments: str = Field(min_length=2)
+    original_arguments: str = ""
+    agent_name: str
+
+
+class ToolCallMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    tool_name: str
+    arguments: dict[str, Any]
+    raw_arguments: str
+    original_arguments: str = ""
 
 
 class ParallelToolExecutor:
@@ -146,13 +167,37 @@ class ParallelToolExecutor:
             except Exception:
                 raw_arguments = str(arguments)
 
+            original_arguments = raw_arguments
+            if isinstance(arguments, dict):
+                candidate_original = arguments.get("original_arguments")
+                if not candidate_original:
+                    candidate_original = arguments.get("_raw_arguments")
+                if candidate_original is not None and str(candidate_original).strip():
+                    original_arguments = str(candidate_original)
+
+            try:
+                validated_payload = SubmittedToolCallPayload.model_validate(
+                    {
+                        "tool_name": tool_name,
+                        "arguments": arguments,
+                        "raw_arguments": raw_arguments,
+                        "original_arguments": original_arguments,
+                        "agent_name": agent_name,
+                    },
+                    strict=True,
+                )
+            except ValidationError as exc:
+                logger.error("Rejected malformed parallel tool payload for %s: %s", tool_name, exc)
+                raise ValueError("tool_arguments_malformed_json: invalid parallel tool payload") from exc
+
             pending_call = PendingToolCall(
                 tool_call_id=tool_call_id,
-                tool_name=tool_name,
+                tool_name=validated_payload.tool_name,
                 tool_function=tool_function,
-                arguments=arguments,
-                raw_arguments=raw_arguments,
-                agent_name=agent_name,
+                arguments=validated_payload.arguments,
+                raw_arguments=validated_payload.raw_arguments,
+                original_arguments=validated_payload.original_arguments,
+                agent_name=validated_payload.agent_name,
                 context_wrapper=context_wrapper
             )
             
@@ -203,13 +248,18 @@ class ParallelToolExecutor:
                 await self.mark_tool_call_timeout(tool_call_id, timeout_error)
                 raise timeout_error from exc
 
-    async def get_tool_call_metadata(self, tool_call_id: str) -> Optional[Tuple[str, Dict[str, Any], str]]:
+    async def get_tool_call_metadata(self, tool_call_id: str) -> Optional[ToolCallMetadata]:
         """Return tool name, parsed arguments, and raw serialized arguments for a pending tool call."""
         async with self._lock:
             call = self.pending_calls.get(tool_call_id)
             if call is None:
                 return None
-            return call.tool_name, dict(call.arguments), str(call.raw_arguments or "{}")
+            return ToolCallMetadata(
+                tool_name=call.tool_name,
+                arguments=dict(call.arguments),
+                raw_arguments=str(call.raw_arguments),
+                original_arguments=str(call.original_arguments),
+            )
     
     async def get_agent_results(self, agent_name: str) -> List[Tuple[str, Any, Optional[Exception]]]:
         """
@@ -277,6 +327,17 @@ class ParallelToolExecutor:
         async with self._semaphore:
             try:
                 logger.debug(f"Executing tool {call.tool_name} (ID: {call.tool_call_id}) for {call.agent_name}")
+
+                parse_error = None
+                if not isinstance(call.arguments, dict):
+                    parse_error = "tool_arguments_malformed_json: non-object tool arguments"
+                else:
+                    parse_marker = str(call.arguments.get("_parse_error", "") or "").strip().lower()
+                    if parse_marker:
+                        parse_error = f"tool_arguments_malformed_json: {parse_marker}"
+
+                if parse_error:
+                    raise ValueError(parse_error)
                 
                 # Execute the tool function
                 result = await call.tool_function(call.context_wrapper, call.arguments)
@@ -351,71 +412,87 @@ class ParallelToolMixin:
         self._pending_parallel_calls.append(tool_call_id)
         return tool_call_id
     
-    async def collect_parallel_results(self) -> List[ToolCallOutputItem]:
-        """Collect results from parallel tool executions using the shared per-tool timeout budget."""
-        results = []
-        
-        for tool_call_id in self._pending_parallel_calls[:]:
-            try:
-                metadata = await self._parallel_executor.get_tool_call_metadata(tool_call_id)
-                result, error = await self._parallel_executor.get_tool_result(
-                    tool_call_id,
-                    timeout=PARALLEL_TOOL_TIMEOUT_S,
-                )
-                
-                if error:
-                    output = f"Error: {str(error)}"
+    async def _collect_single_parallel_result(self, tool_call_id: str) -> Optional[ToolCallOutputItem]:
+        """Collect one tool result with per-call error isolation for swarm-style MCP execution."""
+        try:
+            metadata = await self._parallel_executor.get_tool_call_metadata(tool_call_id)
+            result, error = await self._parallel_executor.get_tool_result(
+                tool_call_id,
+                timeout=PARALLEL_TOOL_TIMEOUT_S,
+            )
+
+            if error:
+                error_text = str(error)
+                if "tool_arguments_malformed_json" in error_text.lower():
+                    tool_name = metadata.tool_name if metadata else "parallel_tool"
+                    raw_args = metadata.original_arguments if metadata else ""
+                    output = {
+                        "ok": False,
+                        "error": "tool_arguments_malformed_json",
+                        "tool": tool_name,
+                        "message": (
+                            "Malformed JSON detected in tool arguments. "
+                            "Retry with a valid JSON object that satisfies the tool schema."
+                        ),
+                        "malformed_json": True,
+                        "raw_input_preview": str(raw_args or "")[:800],
+                    }
                 else:
-                    output = result
+                    output = f"Error: {error_text}"
+            else:
+                output = result
 
-                tool_name = metadata[0] if metadata else "parallel_tool"
-                tool_arguments = metadata[1] if metadata else None
-                serialized_arguments = metadata[2] if metadata else ""
-                if not serialized_arguments:
-                    serialized_arguments = json.dumps(
-                        {
-                            "_metadata_missing": True,
-                            "_tool_call_id": tool_call_id,
-                        },
-                        ensure_ascii=True,
-                        separators=(",", ":"),
-                    )
-                
-                # Create a mock tool call for the result
-                from openai.types.responses import ResponseFunctionToolCall
-                mock_tool_call = ResponseFunctionToolCall(
-                    id=tool_call_id,
-                    call_id=tool_call_id[:40],
-                    type="function_call",
-                    name=tool_name,
-                    arguments=serialized_arguments,
-                )
+            tool_name = metadata.tool_name if metadata else "parallel_tool"
+            tool_arguments = metadata.arguments if metadata else None
+            serialized_arguments = (
+                metadata.original_arguments if metadata and metadata.original_arguments else (metadata.raw_arguments if metadata else "")
+            )
 
-                raw_item = ItemHelpers.tool_call_output_item(mock_tool_call, output)
-                # Preserve original call metadata for observability/auditing in replay traces.
-                raw_item["name"] = tool_name
+            from openai.types.responses import ResponseFunctionToolCall
+
+            mock_tool_call = ResponseFunctionToolCall(
+                id=tool_call_id,
+                call_id=tool_call_id[:40],
+                type="function_call",
+                name=tool_name,
+                arguments=serialized_arguments,
+            )
+
+            raw_item = ItemHelpers.tool_call_output_item(mock_tool_call, output)
+            raw_item["name"] = tool_name
+            if serialized_arguments:
                 raw_item["arguments"] = serialized_arguments
-                if tool_arguments is not None:
-                    raw_item["parsed_arguments"] = tool_arguments
-                
-                results.append(
-                    ToolCallOutputItem(
-                        output=output,
-                        raw_item=raw_item,
-                        agent=self  # type: ignore
-                    )
-                )
-                
+                raw_item["original_arguments"] = serialized_arguments
+            if tool_arguments is not None:
+                raw_item["parsed_arguments"] = tool_arguments
+
+            return ToolCallOutputItem(
+                output=output,
+                raw_item=raw_item,
+                agent=self,  # type: ignore
+            )
+
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Parallel tool call %s timed out during result collection; marked failed and removed from pending queue",
+                tool_call_id,
+            )
+            return None
+        except Exception as e:
+            logger.error("Error collecting parallel result for %s: %s", tool_call_id, e)
+            return None
+        finally:
+            if tool_call_id in self._pending_parallel_calls:
                 self._pending_parallel_calls.remove(tool_call_id)
-                
-            except asyncio.TimeoutError:
-                if tool_call_id in self._pending_parallel_calls:
-                    self._pending_parallel_calls.remove(tool_call_id)
-                logger.warning(
-                    "Parallel tool call %s timed out during result collection; marked failed and removed from pending queue",
-                    tool_call_id,
-                )
-            except Exception as e:
-                logger.error(f"Error collecting parallel result: {e}")
-        
-        return results
+
+    async def collect_parallel_results(self) -> List[ToolCallOutputItem]:
+        """Collect results from parallel tool executions using concurrent gather and isolated failures."""
+        pending_ids = self._pending_parallel_calls[:]
+        if not pending_ids:
+            return []
+
+        collected = await asyncio.gather(
+            *(self._collect_single_parallel_result(tool_call_id) for tool_call_id in pending_ids),
+            return_exceptions=False,
+        )
+        return [item for item in collected if item is not None]

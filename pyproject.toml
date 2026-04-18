@@ -20,6 +20,7 @@ dependencies = [
     # core cerberus runtime
     "openai>=1.75.0,<3",
     "pydantic>=2.10, <3",
+    "pydantic-settings>=2.6.0, <3",
     "griffe>=2.0.0, <3",
     "typing-extensions>=4.12.2, <5",
     "requests>=2.0, <3",
@@ -46,6 +47,8 @@ dependencies = [
     "networkx>=3.6.1,<4; python_version>='3.11'",
     "PyPDF2",
     "ddgs>=9.13.1",
+    "playwright>=1.42.0",
+    "beautifulsoup4>=4.12.0",
 ]
 classifiers = [
     "Typing :: Typed",
@@ -251,6 +254,8 @@ exclude_also = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
 filterwarnings = [
     # This is a warning that is expected to happen: we have an async filter that raises an exception
     "ignore:coroutine 'test_async_input_filter_fails.<locals>.invalid_input_filter' was never awaited:RuntimeWarning",

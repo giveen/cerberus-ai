@@ -14,6 +14,7 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   timeout: 60_000,
+  globalSetup: './e2e/global-setup.ts',
   /* Run tests in files in parallel */
   fullyParallel: false,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
@@ -61,11 +62,13 @@ export default defineConfig({
     // },
   ],
 
-  /* Run your local dev server before starting the tests */
-  webServer: {
-    command: 'reflex run --env prod',
-    url: 'http://127.0.0.1:8000',
-    reuseExistingServer: true,
-    timeout: 120_000,
-  },
+  /* Optional local mode for non-docker debugging. */
+  webServer: process.env.PLAYWRIGHT_LOCAL_SERVER
+    ? {
+        command: 'reflex run --env prod',
+        url: 'http://127.0.0.1:8000',
+        reuseExistingServer: true,
+        timeout: 120_000,
+      }
+    : undefined,
 });

@@ -35,7 +35,7 @@ from openai.types.responses.response_reasoning_item import ResponseReasoningItem
 
 from cerberus.parsers import parse_json_lenient, parse_response
 from cerberus.internal.debug_logger import get_debug_logger
-from cerberus.guardrails.policy_engine import PolicyDecision, evaluate_tool_execution
+from cerberus.core.policy_engine import PolicyDecision, evaluate_tool_execution
 
 from .agent import Agent, ToolsToFinalOutputResult
 from .agent_output import AgentOutputSchema
@@ -735,6 +735,27 @@ class RunImpl:
                 validation_error=cls._build_runner_tool_malformed_json_error(
                     tool_name=tool_name,
                     raw_arguments=normalized_arguments,
+                    params_json_schema=params_json_schema,
+                ),
+                parsed_arguments=None,
+                was_repaired=was_repaired,
+                repaired_arguments=repaired_arguments,
+            )
+
+        if str(parsed_arguments.get("_parse_error", "") or "").strip():
+            raw_preview = str(parsed_arguments.get("_raw_arguments", "") or normalized_arguments)
+            _RUNTIME_DEBUG_LOGGER.write(
+                channel="trace_debug",
+                message="runner_tool_argument_parse_error_payload",
+                payload={
+                    "tool_name": tool_name,
+                    "arguments_preview": raw_preview[:800],
+                },
+            )
+            return ToolArgValidationOutcome(
+                validation_error=cls._build_runner_tool_malformed_json_error(
+                    tool_name=tool_name,
+                    raw_arguments=raw_preview,
                     params_json_schema=params_json_schema,
                 ),
                 parsed_arguments=None,
@@ -1528,13 +1549,14 @@ class RunImpl:
             "status": "REJECTED_BY_OPERATOR",
             "error": "tool_execution_rejected_by_operator",
             "tool": tool_name,
-            "message": "Operator rejected repaired tool arguments. Select a safer alternative.",
+            "message": "Operator rejected repaired tool arguments. Strategic reassessment required before retry.",
             "risk_tier": int(pending_payload.get("risk_tier", 4) or 4),
             "was_repaired": bool(pending_payload.get("was_repaired", False)),
             "raw_arguments": pending_payload.get("raw_arguments", raw_arguments),
             "repaired_arguments": pending_payload.get("repaired_arguments"),
             "operator_decision": "REJECT",
             "operator_reason": str(decision_payload.get("reason", "") or "").strip(),
+            "requires_reassessment": True,
         }
 
     @classmethod
