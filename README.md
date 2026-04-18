@@ -17,21 +17,57 @@ Cerberus AI gives operators a controlled execution environment where policy-veri
 
 **Prerequisites:** Docker and Docker Compose
 
-From the repository root:
+Build from the `dockerized/` directory:
 
 ```bash
-docker compose -f dockerized/docker-compose.yml up --build
+cd dockerized
+docker compose build
+```
+
+Or from the repository root:
+
+```bash
+make docker-build
+```
+
+Start the default dashboard stack:
+
+```bash
+docker compose up -d
+```
+
+If you want the full runtime profile as well:
+
+```bash
+docker compose --profile runtime --profile mcp up -d
+```
+
+To stop the stack cleanly, use the profile-aware shutdown command:
+
+```bash
+make docker-down
+```
+
+Equivalent direct command:
+
+```bash
+cd dockerized
+docker compose --profile runtime --profile mcp down --remove-orphans
 ```
 
 Then:
 
 1. Open `http://localhost:8000` in your browser
-2. Dispatch commands through the 2x2 session grid
-3. Watch live logs stream in the terminal panes  
-4. Click **STOP** on any session to terminate its subprocess tree
+2. Wait up to a minute on first startup while the dashboard services warm up and health checks settle
+3. Dispatch commands through the 2x2 session grid
+4. Watch live logs stream in the terminal panes  
+5. Click **STOP** on any session to terminate its subprocess tree
 
 > [!NOTE]
-> Default ports: dashboard (8000), API (8001), Redis (6379). Add `--profile runtime` to expose Qdrant (6333–6334) for full tooling.
+> Default ports: dashboard (8000), API (8001), Redis (6379). The first dashboard load can take a minute after `docker compose up -d`, especially after a fresh build or when runtime sidecars are also starting.
+
+> [!IMPORTANT]
+> Plain `docker compose down` from `dockerized/` only tears down services visible in the currently active Compose profile set. If you previously started `runtime` or `mcp` services, use the profile-aware shutdown command above so `cerberus`, `qdrant`, `container-mcp`, and `hexstrike-server` are removed as well.
 
 ## Local Development Setup
 

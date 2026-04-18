@@ -77,6 +77,23 @@ To explicitly include MCP sidecars while launching runtime:
 docker compose -f dockerized/docker-compose.yml --profile runtime --profile mcp up --build
 ```
 
+## Shutdown
+
+If you started runtime or MCP profile services, stop the stack with the same profile set:
+
+```bash
+cd dockerized
+docker compose --profile runtime --profile mcp down --remove-orphans
+```
+
+From the repository root you can also use:
+
+```bash
+make docker-down
+```
+
+Plain `docker compose down` only tears down services in the active Compose config and can leave profile-backed containers such as `cerberus`, `qdrant`, `container-mcp`, and `hexstrike-server` running.
+
 ## Development Overlay
 
 To mount live source into both the runtime and dashboard containers:

@@ -2,6 +2,22 @@
 sync:
 	uv sync --all-extras --all-packages --group dev
 
+.PHONY: docker-build
+docker-build:
+	cd dockerized && docker compose build
+
+.PHONY: docker-up
+docker-up:
+	cd dockerized && docker compose up -d
+
+.PHONY: docker-up-runtime
+docker-up-runtime:
+	cd dockerized && docker compose --profile runtime --profile mcp up -d
+
+.PHONY: docker-down
+docker-down:
+	cd dockerized && docker compose --profile runtime --profile mcp down --remove-orphans
+
 .PHONY: format
 format: 
 	uv run ruff format
