@@ -143,8 +143,9 @@ services:
         apt-get install -y --no-install-recommends git
         rm -rf /var/lib/apt/lists/*
         if [ ! -f /opt/hexstrike-ai/hexstrike_server.py ]; then
-          rm -rf /opt/hexstrike-ai
-          git clone --depth 1 https://github.com/0x4m4/hexstrike-ai.git /opt/hexstrike-ai
+          git clone --depth 1 https://github.com/0x4m4/hexstrike-ai.git /tmp/hexstrike-ai-src
+          cp -a /tmp/hexstrike-ai-src/. /opt/hexstrike-ai/
+          rm -rf /tmp/hexstrike-ai-src
         fi
         pip install --no-cache-dir -r /opt/hexstrike-ai/requirements.txt
         python3 /opt/hexstrike-ai/hexstrike_server.py --port 8888
