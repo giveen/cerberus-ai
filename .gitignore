@@ -75,6 +75,7 @@ dockerized/qdrant_data/
 dockerized/volumes/*
 !dockerized/volumes/.gitkeep
 tmp_test_run/
+workspace_cli_test/
 workspaces/*
 !workspaces/.gitkeep
 
