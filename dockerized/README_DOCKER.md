@@ -92,7 +92,14 @@ From the repository root you can also use:
 make docker-down
 ```
 
+To inspect the full Cerberus stack from the repository root:
+
+```bash
+make docker-ps
+```
+
 Plain `docker compose down` only tears down services in the active Compose config and can leave profile-backed containers such as `cerberus`, `qdrant`, `container-mcp`, and `hexstrike-server` running.
+Plain `docker compose ps` has the same limitation for status inspection unless you include the matching profiles.
 
 ## Development Overlay
 

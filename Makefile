@@ -18,6 +18,10 @@ docker-up-runtime:
 docker-down:
 	cd dockerized && docker compose --profile runtime --profile mcp down --remove-orphans
 
+.PHONY: docker-ps
+docker-ps:
+	cd dockerized && docker compose --profile runtime --profile mcp ps -a
+
 .PHONY: format
 format: 
 	uv run ruff format

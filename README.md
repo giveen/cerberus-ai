@@ -48,6 +48,12 @@ To stop the stack cleanly, use the profile-aware shutdown command:
 make docker-down
 ```
 
+To inspect the full stack status, including runtime and MCP services:
+
+```bash
+make docker-ps
+```
+
 Equivalent direct command:
 
 ```bash
@@ -68,6 +74,7 @@ Then:
 
 > [!IMPORTANT]
 > Plain `docker compose down` from `dockerized/` only tears down services visible in the currently active Compose profile set. If you previously started `runtime` or `mcp` services, use the profile-aware shutdown command above so `cerberus`, `qdrant`, `container-mcp`, and `hexstrike-server` are removed as well.
+> The same applies to status checks: `make docker-ps` shows the full profile-backed stack, while plain `docker compose ps` only shows services in the active config.
 
 ## Local Development Setup
 
