@@ -17,17 +17,31 @@ Cerberus AI gives operators a controlled execution environment where policy-veri
 
 **Prerequisites:** Docker and Docker Compose
 
+Use the supported repository-root workflow:
+
+```bash
+make docker-build
+make docker-up
+make docker-up-runtime
+make docker-ps
+make docker-down
+```
+
+What each command does:
+
+1. `make docker-build` builds the Docker images
+2. `make docker-up` starts the default dashboard stack
+3. `make docker-up-runtime` starts the full runtime plus MCP sidecars
+4. `make docker-ps` shows the full Cerberus stack, including profile-backed services
+5. `make docker-down` shuts everything down cleanly
+
+Direct Compose equivalents are still available if you need them.
+
 Build from the `dockerized/` directory:
 
 ```bash
 cd dockerized
 docker compose build
-```
-
-Or from the repository root:
-
-```bash
-make docker-build
 ```
 
 Start the default dashboard stack:
