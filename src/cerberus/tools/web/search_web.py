@@ -14,6 +14,8 @@ _H3_LINK_RE = re.compile(r"<h3>\s*<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>\s*</h3
 _CONTENT_RE = re.compile(r"<p class=\"content\">(.*?)</p>", re.DOTALL | re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
 _SPACE_RE = re.compile(r"\s+")
+_LANG_BASE_RE = re.compile(r"^[A-Za-z]{2,3}$")
+_LANG_LOCALE_RE = re.compile(r"^[A-Za-z]{2,3}([_-][A-Za-z]{2})$")
 
 
 def _sanitize_external_content(raw: str) -> str:
@@ -77,6 +79,44 @@ def _compose_query(query: str, context: str) -> str:
     return f"{query_text} {context_text}"
 
 
+def _normalize_language(language: str) -> str:
+    value = str(language or "").strip()
+    if not value:
+        return "en"
+
+    # Handle malformed values such as "-US" by dropping leading separators.
+    value = value.lstrip("-_")
+    if not value:
+        return "en"
+
+    normalized = value.replace("_", "-")
+
+    # Accept plain language codes like "en" and normalize to lowercase.
+    if _LANG_BASE_RE.match(normalized):
+        base = normalized.lower()
+        # Guard against malformed country-only values from inputs like "-US".
+        if base in {"us", "uk"}:
+            return "en"
+        return base
+
+    # Accept locale tokens like "en-US".
+    if _LANG_LOCALE_RE.match(normalized):
+        parts = normalized.split("-", 1)
+        return f"{parts[0].lower()}-{parts[1].upper()}"
+
+    lowered = value.lower()
+    if lowered in {"all", "auto"}:
+        return lowered
+    return "en"
+
+
+def _normalize_categories(categories: str) -> str:
+    value = str(categories or "").strip()
+    if not value:
+        return "general"
+    return value
+
+
 def _perform_searxng_search(
     *,
     query: str,
@@ -91,13 +131,15 @@ def _perform_searxng_search(
         return "Error: query is required."
 
     base_url = _resolve_searxng_base_url()
-    endpoint = f"{base_url}/"
+    endpoint = f"{base_url}/search"
     limit = max(1, min(int(max_results), 20))
+    normalized_language = _normalize_language(language)
+    normalized_categories = _normalize_categories(categories)
     params: dict[str, Any] = {
         "q": normalized_query,
         "safesearch": 0,
-        "language": language,
-        "categories": categories,
+        "language": normalized_language,
+        "categories": normalized_categories,
         "pageno": 1,
     }
     if time_range:

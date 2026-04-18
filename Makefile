@@ -8,7 +8,7 @@ docker-build:
 
 .PHONY: docker-up
 docker-up:
-	cd dockerized && docker compose --profile runtime --profile mcp up -d
+	cd dockerized && docker compose up -d cerberus-dashboard redis qdrant cerberus-tools-hub
 
 .PHONY: docker-up-runtime
 docker-up-runtime:
@@ -16,11 +16,11 @@ docker-up-runtime:
 
 .PHONY: docker-down
 docker-down:
-	cd dockerized && docker compose --profile runtime --profile mcp down --remove-orphans
+	cd dockerized && docker compose down --remove-orphans
 
 .PHONY: docker-ps
 docker-ps:
-	cd dockerized && docker compose --profile runtime --profile mcp ps -a
+	cd dockerized && docker compose ps -a
 
 .PHONY: format
 format: 

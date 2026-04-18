@@ -1,0 +1,12 @@
+FROM docker:dind
+
+WORKDIR /workspace
+
+RUN apk add --no-cache bash docker-cli-compose
+
+COPY . /workspace
+COPY dockerized/tools_hub_entrypoint.sh /usr/local/bin/tools-hub-entrypoint
+
+RUN chmod +x /usr/local/bin/tools-hub-entrypoint
+
+ENTRYPOINT ["/usr/local/bin/tools-hub-entrypoint"]

@@ -425,12 +425,6 @@ def _sanitize_prompt_response_text(text: str) -> str:
         line = raw_line.strip()
         lowered = line.lower()
 
-        for marker in PROMPT_INLINE_TRUNCATION_MARKERS:
-            marker_index = lowered.find(marker)
-            if marker_index != -1:
-                line = line[:marker_index].rstrip(" |-:")
-                lowered = line.lower()
-
         if not line:
             if filtered_lines and filtered_lines[-1] != "":
                 filtered_lines.append("")
@@ -580,18 +574,20 @@ def _extract_prompt_response_from_lines(
         panel_content = _extract_panel_content(cleaned)
         if panel_content is not None:
             if _is_prompt_response_tail_line(panel_content):
-                break
+                # Tail markers may appear interleaved with streamed output; skip
+                # these lines but continue collecting the full response.
+                continue
             captured_lines.append(panel_content)
             continue
 
         if _is_box_border_line(stripped):
-            # Ignore panel borders instead of breaking. Some responses include
             # multiple framed blocks and markdown separators that would
             # otherwise cause premature truncation.
             continue
 
         if _is_prompt_response_tail_line(stripped):
-            break
+            # Skip known telemetry tail lines without terminating capture.
+            continue
 
         captured_lines.append(stripped)
 

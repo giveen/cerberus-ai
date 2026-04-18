@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 from typing import Iterable
 
 from dotenv import dotenv_values, set_key
@@ -34,6 +35,11 @@ RESTART_SERVICES_BY_FILE = {
     "dashboard.env": ("cerberus-dashboard",),
     "app.env": ("container-mcp",),
 }
+TOOLS_HUB_HOSTNAME = "cerberus-tools-hub"
+TOOLS_HUB_URL_KEYS = {
+    "SEARXNG_BASE_URL": 8080,
+    "CERBERUS_CONTAINER_MCP_URL": 8000,
+}
 
 
 def _first_existing_path(candidates: Iterable[Path], fallback: Path) -> Path:
@@ -49,9 +55,41 @@ def _normalize_value(value: object) -> str:
     return str(value or "")
 
 
+def _force_tools_hub_url(key: str, value: str) -> str:
+    normalized_key = str(key or "").strip().upper()
+    if normalized_key not in TOOLS_HUB_URL_KEYS:
+        return str(value or "")
+
+    raw = str(value or "").strip()
+    default_port = TOOLS_HUB_URL_KEYS[normalized_key]
+    if not raw:
+        if normalized_key == "CERBERUS_CONTAINER_MCP_URL":
+            return f"http://{TOOLS_HUB_HOSTNAME}:{default_port}/sse"
+        return f"http://{TOOLS_HUB_HOSTNAME}:{default_port}"
+
+    parsed = urlsplit(raw)
+    if not parsed.scheme:
+        if normalized_key == "CERBERUS_CONTAINER_MCP_URL":
+            return f"http://{TOOLS_HUB_HOSTNAME}:{default_port}/sse"
+        return f"http://{TOOLS_HUB_HOSTNAME}:{default_port}"
+
+    path = parsed.path or ""
+    if normalized_key == "CERBERUS_CONTAINER_MCP_URL" and not path:
+        path = "/sse"
+
+    netloc = f"{TOOLS_HUB_HOSTNAME}:{default_port}"
+    return urlunsplit((parsed.scheme, netloc, path, parsed.query, parsed.fragment))
+
+
 def resolve_env_path_for_key(key: str) -> Path:
     normalized = str(key or "").strip().upper()
-    if normalized in {"REDIS_URL", "REFLEX_REDIS_URL", "CERBERUS_WORKSPACE_ROOT"}:
+    if normalized in {
+        "REDIS_URL",
+        "REFLEX_REDIS_URL",
+        "CERBERUS_WORKSPACE_ROOT",
+        "SEARXNG_BASE_URL",
+        "CERBERUS_CONTAINER_MCP_URL",
+    }:
         return _first_existing_path(DASHBOARD_ENV_CANDIDATES, DASHBOARD_ENV_PATH)
     if normalized in {"DEBUG_MODE", "MCP_HOST", "MCP_PORT"}:
         return _first_existing_path(APP_ENV_CANDIDATES, APP_ENV_PATH)
@@ -98,6 +136,10 @@ def load_config() -> dict[str, str]:
         if key.startswith("CERBERUS_") or key.startswith("CEREBRO_") or key in EXTRA_KEYS:
             payload[key] = str(value)
 
+    for key in TOOLS_HUB_URL_KEYS:
+        if key in payload:
+            payload[key] = _force_tools_hub_url(key, payload[key])
+
     return payload
 
 
@@ -107,6 +149,7 @@ def update_env(key: str, value: object) -> tuple[str, ...]:
         raise ValueError("Environment key is required.")
 
     normalized_value = _normalize_value(value)
+    normalized_value = _force_tools_hub_url(normalized_key, normalized_value)
     target_path = resolve_env_path_for_key(normalized_key)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     if not target_path.exists():

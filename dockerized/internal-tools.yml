@@ -1,0 +1,119 @@
+services:
+  cerberus:
+    build:
+      context: ..
+      dockerfile: dockerized/Dockerfile
+      target: runtime
+    container_name: inner-cerberus
+    env_file:
+      - ../.env
+      - ./.env/runtime.env
+    environment:
+      SEARXNG_BASE_URL: "http://searxng:8080"
+      QDRANT_URL: "http://host.docker.internal:6333"
+      REDIS_URL: "redis://host.docker.internal:6379"
+      REFLEX_REDIS_URL: "redis://host.docker.internal:6379"
+      CERBERUS_CONTAINER_MCP_URL: "http://container-mcp:8000/sse"
+    volumes:
+      - ./config:/config:ro
+      - /workspace/workspaces:/workspace/workspaces
+      - ./volumes/logs:/workspace/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    depends_on:
+      searxng:
+        condition: service_started
+      container-mcp:
+        condition: service_started
+    networks:
+      - hub-net
+    stdin_open: true
+    tty: true
+    pids_limit: 100
+    restart: on-failure
+
+  container-mcp:
+    build:
+      context: https://github.com/54rt1n/container-mcp.git#master
+      dockerfile: Containerfile
+    container_name: inner-container-mcp
+    env_file:
+      - ./.env/app.env
+    environment:
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./.env:/app/config:ro
+      - ./volumes/container-mcp:/app/volume
+    healthcheck:
+      test: ["CMD-SHELL", "ls /app/config/app.env >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+    networks:
+      - hub-net
+    restart: unless-stopped
+
+  hexstrike-server:
+    image: python:3.12-slim
+    container_name: inner-hexstrike-server
+    command:
+      - sh
+      - -lc
+      - |
+        set -e
+        apt-get update
+        apt-get install -y --no-install-recommends git
+        rm -rf /var/lib/apt/lists/*
+        if [ ! -f /opt/hexstrike-ai/hexstrike_server.py ]; then
+          git clone --depth 1 https://github.com/0x4m4/hexstrike-ai.git /tmp/hexstrike-ai-src
+          cp -a /tmp/hexstrike-ai-src/. /opt/hexstrike-ai/
+          rm -rf /tmp/hexstrike-ai-src
+        fi
+        pip install --no-cache-dir -r /opt/hexstrike-ai/requirements.txt
+        python3 /opt/hexstrike-ai/hexstrike_server.py --port 8888
+    volumes:
+      - ./volumes/hexstrike:/opt/hexstrike-ai
+    networks:
+      - hub-net
+    restart: unless-stopped
+
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: inner-searxng
+    env_file:
+      - ./.env/searxng.env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./searxng/core-config:/etc/searxng
+      - ./volumes/searxng-cache:/var/cache/searxng
+    depends_on:
+      valkey:
+        condition: service_started
+    networks:
+      - hub-net
+    restart: unless-stopped
+
+  valkey:
+    image: docker.io/valkey/valkey:9-alpine
+    container_name: inner-searxng-valkey
+    command: valkey-server --save 30 1 --loglevel warning
+    volumes:
+      - ./volumes/searxng-valkey:/data
+    networks:
+      - hub-net
+    restart: unless-stopped
+
+networks:
+  hub-net:
+    driver: bridge

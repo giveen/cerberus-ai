@@ -10,7 +10,8 @@ services:
       - ./.env/dashboard.env
     environment:
       PYTHONUNBUFFERED: "1"
-      SEARXNG_BASE_URL: "http://searxng:8080"
+      SEARXNG_BASE_URL: "http://cerberus-tools-hub:8080"
+      CERBERUS_CONTAINER_MCP_URL: "http://cerberus-tools-hub:8000/sse"
       CERBERUS_PRICE_LIMIT: "100"
       CEREBRO_PRICE_LIMIT: "100"
     volumes:
@@ -29,132 +30,29 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      searxng:
+      cerberus-tools-hub:
         condition: service_started
     networks:
       - cerberus-bridge
     stop_grace_period: 30s
     restart: "no"
 
-  cerberus:
+  cerberus-tools-hub:
     build:
       context: ..
-      dockerfile: dockerized/Dockerfile
-      target: runtime
-    container_name: cerberus
-    profiles:
-      - runtime
-    env_file:
-      - ../.env
-      - ./.env/runtime.env
-    environment:
-      SEARXNG_BASE_URL: "http://searxng:8080"
-      QDRANT_URL: "http://qdrant:6333"
-      CERBERUS_PRICE_LIMIT: "100"
-      CEREBRO_PRICE_LIMIT: "100"
-      # Default external MCP endpoint wiring. Override in ./.env/runtime.env if needed.
-      CERBERUS_CONTAINER_MCP_URL: "${CERBERUS_CONTAINER_MCP_URL:-http://container-mcp:8000/sse}"
-      CERBERUS_PORTSWIGGER_MCP_URL: "${CERBERUS_PORTSWIGGER_MCP_URL:-}"
-      CERBERUS_AWSOME_KALI_MCP_COMMAND: "${CERBERUS_AWSOME_KALI_MCP_COMMAND:-}"
-      CERBERUS_HEXSTRIKE_MCP_COMMAND: "${CERBERUS_HEXSTRIKE_MCP_COMMAND:-}"
+      dockerfile: dockerized/Dockerfile.tools_hub
+    container_name: cerberus-tools-hub
+    privileged: true
     volumes:
-      - ./config:/config:ro
+      - ./volumes/inner_docker:/var/lib/docker
       - ./volumes/workspaces:/workspace/workspaces
-      - ./volumes/logs:/workspace/logs
-      - /var/run/docker.sock:/var/run/docker.sock
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    devices:
-      - /dev/net/tun:/dev/net/tun
+      - ./internal-tools.yml:/workspace/dockerized/internal-tools.yml:ro
+      - ./searxng:/workspace/dockerized/searxng:ro
     networks:
       - cerberus-bridge
-    stdin_open: true
-    tty: true
-    pids_limit: 100
-    depends_on:
-      cerberus-dashboard:
-        condition: service_healthy
-      qdrant:
-        condition: service_started
-      searxng:
-        condition: service_started
-      container-mcp:
-        condition: service_started
-    healthcheck:
-      test: ["CMD-SHELL", "command -v cerberus >/dev/null && test -d \"${CERBERUS_WORKSPACE_ROOT:-/workspace/workspaces}\" && kill -0 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    stop_grace_period: 45s
-    restart: on-failure
-    deploy:
-      restart_policy:
-        condition: on-failure
-        max_attempts: 5
-
-  # Optional SSE endpoint for CERBERUS_CONTAINER_MCP_URL.
-  # Builds from source to avoid dependency on private/denied registry tags.
-  container-mcp:
-    build:
-      context: https://github.com/54rt1n/container-mcp.git#master
-      dockerfile: Containerfile
-    container_name: cerberus-container-mcp
-    profiles:
-      - runtime
-      - mcp
     ports:
+      - "8500:8080"
       - "19000:8000"
-    env_file:
-      - ./.env/app.env
-    environment:
-      MCP_HOST: "0.0.0.0"
-      MCP_PORT: "8000"
-    volumes:
-      - ./.env:/app/config:ro
-      - ./volumes/container-mcp:/app/volume
-    healthcheck:
-      test: ["CMD-SHELL", "ls /app/config/app.env >/dev/null 2>&1"]
-      interval: 10s
-      timeout: 5s
-      retries: 8
-      start_period: 20s
-    networks:
-      - cerberus-bridge
-    restart: unless-stopped
-
-  # Optional helper to run HexStrike server in compose.
-  # CERBERUS_HEXSTRIKE_MCP_COMMAND still needs to point to a working stdio bridge command.
-  hexstrike-server:
-    image: python:3.12-slim
-    container_name: cerberus-hexstrike-server
-    profiles:
-      - runtime
-      - mcp
-    command:
-      - sh
-      - -lc
-      - |
-        set -e
-        apt-get update
-        apt-get install -y --no-install-recommends git
-        rm -rf /var/lib/apt/lists/*
-        if [ ! -f /opt/hexstrike-ai/hexstrike_server.py ]; then
-          git clone --depth 1 https://github.com/0x4m4/hexstrike-ai.git /tmp/hexstrike-ai-src
-          cp -a /tmp/hexstrike-ai-src/. /opt/hexstrike-ai/
-          rm -rf /tmp/hexstrike-ai-src
-        fi
-        pip install --no-cache-dir -r /opt/hexstrike-ai/requirements.txt
-        python3 /opt/hexstrike-ai/hexstrike_server.py --port 8888
-    volumes:
-      - ./volumes/hexstrike:/opt/hexstrike-ai
-    ports:
-      - "18888:8888"
-    networks:
-      - cerberus-bridge
     restart: unless-stopped
 
   redis:
@@ -177,8 +75,6 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     container_name: cerberus-qdrant
-    profiles:
-      - runtime
     ports:
       - "6333:6333"
       - "6334:6334"
@@ -187,35 +83,6 @@ services:
     networks:
       - cerberus-bridge
     stop_grace_period: 45s
-    restart: "no"
-
-  searxng:
-    image: docker.io/searxng/searxng:latest
-    container_name: cerberus-searxng
-    env_file:
-      - ./.env/searxng.env
-    ports:
-      - "8500:8080"
-    volumes:
-      - ./searxng/core-config:/etc/searxng
-      - ./volumes/searxng-cache:/var/cache/searxng
-    networks:
-      - cerberus-bridge
-    depends_on:
-      valkey:
-        condition: service_started
-    stop_grace_period: 30s
-    restart: "no"
-
-  valkey:
-    image: docker.io/valkey/valkey:9-alpine
-    container_name: cerberus-searxng-valkey
-    command: valkey-server --save 30 1 --loglevel warning
-    volumes:
-      - ./volumes/searxng-valkey:/data
-    networks:
-      - cerberus-bridge
-    stop_grace_period: 30s
     restart: "no"
 
 networks:

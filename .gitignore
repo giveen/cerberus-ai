@@ -59,6 +59,7 @@ tmp_parallel_tasks.txt
 .web/
 .flowbaby/
 audit/
+archive/
 logs/
 nohup.out
 *.log
