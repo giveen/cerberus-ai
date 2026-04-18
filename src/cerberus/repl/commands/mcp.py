@@ -587,8 +587,7 @@ def get_agents_for_mcp_server(server_name: str) -> List[str]:
 def _safe_get_available_agents() -> Dict[str, Any]:
     try:
         return get_available_agents()
-    except Exception as exc:
-        _log.debug("Unable to enumerate available agents for MCP association: %s", exc)
+    except Exception:
         return {}
 
 

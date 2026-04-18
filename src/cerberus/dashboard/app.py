@@ -414,6 +414,7 @@ def _serialize_dashboard_snapshot(
     session_uuid: str,
     verbose_logs: bool,
     parallel_execution: bool,
+    show_tool_logs: bool,
     tier_1_enabled: bool,
     tier_2_enabled: bool,
     tier_3_enabled: bool,
@@ -432,6 +433,7 @@ def _serialize_dashboard_snapshot(
         "session_uuid": str(session_uuid),
         "verbose_logs": bool(verbose_logs),
         "parallel_execution": bool(parallel_execution),
+        "show_tool_logs": bool(show_tool_logs),
         "tier_1_enabled": bool(tier_1_enabled),
         "tier_2_enabled": bool(tier_2_enabled),
         "tier_3_enabled": bool(tier_3_enabled),
@@ -494,6 +496,7 @@ def _deserialize_dashboard_snapshot(payload: str) -> dict[str, Any] | None:
         "session_uuid": str(parsed.get("session_uuid", "") or ""),
         "verbose_logs": bool(parsed.get("verbose_logs", False)),
         "parallel_execution": bool(parsed.get("parallel_execution", True)),
+        "show_tool_logs": bool(parsed.get("show_tool_logs", True)),
         "tier_1_enabled": bool(parsed.get("tier_1_enabled", True)),
         "tier_2_enabled": bool(parsed.get("tier_2_enabled", True)),
         "tier_3_enabled": bool(parsed.get("tier_3_enabled", True)),
@@ -730,6 +733,7 @@ class AgentDashboardState(rx.State):
     session_uuid: str = "unknown"
     verbose_logs: bool = False
     parallel_execution: bool = True
+    show_tool_logs: bool = True
     tier_1_enabled: bool = True
     tier_2_enabled: bool = True
     tier_3_enabled: bool = True
@@ -740,6 +744,7 @@ class AgentDashboardState(rx.State):
             "version": 1,
             "verbose_logs": bool(self.verbose_logs),
             "parallel_execution": bool(self.parallel_execution),
+            "show_tool_logs": bool(self.show_tool_logs),
             "tier_1_enabled": bool(self.tier_1_enabled),
             "tier_2_enabled": bool(self.tier_2_enabled),
             "tier_3_enabled": bool(self.tier_3_enabled),
@@ -770,6 +775,7 @@ class AgentDashboardState(rx.State):
             async with self:
                 self.verbose_logs = bool(payload.get("verbose_logs", self.verbose_logs))
                 self.parallel_execution = bool(payload.get("parallel_execution", self.parallel_execution))
+                self.show_tool_logs = bool(payload.get("show_tool_logs", self.show_tool_logs))
                 self.tier_1_enabled = bool(payload.get("tier_1_enabled", self.tier_1_enabled))
                 self.tier_2_enabled = bool(payload.get("tier_2_enabled", self.tier_2_enabled))
                 self.tier_3_enabled = bool(payload.get("tier_3_enabled", self.tier_3_enabled))
@@ -849,6 +855,12 @@ class AgentDashboardState(rx.State):
         self._schedule_intel_config_persist()
 
     @rx.event
+    def toggle_show_tool_logs(self) -> None:
+        self.show_tool_logs = not bool(self.show_tool_logs)
+        self._persist_dashboard_snapshot()
+        self._schedule_intel_config_persist()
+
+    @rx.event
     def toggle_parallel_execution(self) -> None:
         self.parallel_execution = not bool(self.parallel_execution)
         self._persist_dashboard_snapshot()
@@ -881,6 +893,7 @@ class AgentDashboardState(rx.State):
             session_uuid=self.session_uuid,
             verbose_logs=self.verbose_logs,
             parallel_execution=self.parallel_execution,
+            show_tool_logs=self.show_tool_logs,
             tier_1_enabled=self.tier_1_enabled,
             tier_2_enabled=self.tier_2_enabled,
             tier_3_enabled=self.tier_3_enabled,
@@ -913,6 +926,7 @@ class AgentDashboardState(rx.State):
         self.session_uuid = restored["session_uuid"] or self.session_uuid
         self.verbose_logs = restored["verbose_logs"]
         self.parallel_execution = restored["parallel_execution"]
+        self.show_tool_logs = restored["show_tool_logs"]
         self.tier_1_enabled = restored["tier_1_enabled"]
         self.tier_2_enabled = restored["tier_2_enabled"]
         self.tier_3_enabled = restored["tier_3_enabled"]
@@ -2818,7 +2832,9 @@ def audit_tier_tile(tier_code: str, tier_label: str, status: Any) -> rx.Componen
 def render_log_entry(entry: dict[str, str]) -> rx.Component:
     return rx.cond(
         entry["role"] == "Tool",
-        rx.box(
+        rx.cond(
+            AgentDashboardState.show_tool_logs,
+            rx.box(
             rx.vstack(
                 rx.hstack(
                     rx.text("Tool", color="#9ADADA", font_size="0.72rem", font_weight="700", letter_spacing="0.06em"),
@@ -2864,6 +2880,8 @@ def render_log_entry(entry: dict[str, str]) -> rx.Component:
             width="100%",
             background="linear-gradient(180deg, rgba(6, 14, 16, 0.95) 0%, rgba(4, 8, 12, 0.94) 100%)",
             border="1px solid rgba(124, 247, 255, 0.24)",
+        ),
+        rx.box(),  # hidden when show_tool_logs is False
         ),
         rx.cond(
         entry["role"] == "Assistant",
@@ -3220,6 +3238,7 @@ def system_sidebar() -> rx.Component:
                 rx.vstack(
                     control_row("verbose_logs", "Verbose Logs", AgentDashboardState.verbose_logs, AgentDashboardState.toggle_verbose_logs),
                     control_row("parallel_execution", "Parallel Execution", AgentDashboardState.parallel_execution, AgentDashboardState.toggle_parallel_execution),
+                    control_row("show_tool_logs", "Show Tool Logs", AgentDashboardState.show_tool_logs, AgentDashboardState.toggle_show_tool_logs),
                     spacing="2",
                     width="100%",
                     align="stretch",

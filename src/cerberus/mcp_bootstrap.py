@@ -91,7 +91,7 @@ def default_managed_mcp_servers() -> list[ManagedMCPServerSettings]:
         ),
         ManagedMCPServerSettings(
             alias="awsome-kali-mcpservers",
-            enabled=True,
+            enabled=False,
             transport="stdio",
             management_mode="external",
             endpoint_env="CERBERUS_AWSOME_KALI_MCP_COMMAND",
@@ -99,7 +99,8 @@ def default_managed_mcp_servers() -> list[ManagedMCPServerSettings]:
             required_env=["CERBERUS_AWSOME_KALI_MCP_COMMAND"],
             notes=(
                 "Awesome Kali MCP stdio command, typically docker run -i <image>. "
-                "Set CERBERUS_AWSOME_KALI_MCP_COMMAND to the full command."
+                "Set CERBERUS_AWSOME_KALI_MCP_COMMAND to the full command. "
+                "Disabled: shimmy0530/kali-mcp-server image is unavailable publicly."
             ),
         ),
         ManagedMCPServerSettings(
@@ -110,15 +111,6 @@ def default_managed_mcp_servers() -> list[ManagedMCPServerSettings]:
             endpoint_env="CERBERUS_BURP_MCP_URL",
             required_env=["CERBERUS_BURP_MCP_URL"],
             notes="User-managed Burp MCP endpoint. Not bootstrapped inside the Kali runtime.",
-        ),
-        ManagedMCPServerSettings(
-            alias="portswigger-mcp",
-            enabled=True,
-            transport="sse",
-            management_mode="external",
-            endpoint_env="CERBERUS_PORTSWIGGER_MCP_URL",
-            required_env=["CERBERUS_PORTSWIGGER_MCP_URL"],
-            notes="PortSwigger Burp MCP SSE endpoint (typically http://127.0.0.1:9876 or /sse).",
         ),
     ]
 
