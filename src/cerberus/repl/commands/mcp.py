@@ -588,7 +588,7 @@ def _safe_get_available_agents() -> Dict[str, Any]:
     try:
         return get_available_agents()
     except Exception as exc:
-        _log.warning("Unable to enumerate available agents for MCP association: %s", exc)
+        _log.debug("Unable to enumerate available agents for MCP association: %s", exc)
         return {}
 
 
@@ -702,7 +702,7 @@ async def _bootstrap_configured_mcp_servers(
         except Exception as exc:
             result["status"] = "error"
             result["error"] = str(exc)
-            _log.warning("Configured MCP bootstrap failed for '%s': %s", spec.alias, exc)
+            _log.debug("Configured MCP bootstrap failed for '%s': %s", spec.alias, exc)
         results.append(result)
 
     return results
@@ -768,7 +768,7 @@ def get_mcp_tools_for_agent(agent_name: str) -> List[FunctionTool]:
     try:
         ensure_configured_mcp_servers()
     except Exception as exc:
-        _log.warning("Configured MCP bootstrap failed while resolving tools for '%s': %s", agent_name, exc)
+        _log.debug("Configured MCP bootstrap failed while resolving tools for '%s': %s", agent_name, exc)
 
     tools: List[FunctionTool] = []
     for server_name in get_mcp_servers_for_agent(agent_name):
